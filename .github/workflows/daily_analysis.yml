@@ -32,9 +32,6 @@ jobs:
     timeout-minutes: 30
     
     steps:
-      - name: Rastgele Gecikme (Sunucu güvenligi icin)
-        run: sleep $((RANDOM % 30))
-      
       - name: Kodu Cek (Checkout)
         uses: actions/checkout@v5
       
@@ -64,12 +61,11 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-1.5-flash' }}
           GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-1.5-pro' }}
-          GEMINI_REQUEST_DELAY: '3.0'
+          GEMINI_REQUEST_DELAY: '2.0'
           
           # Bildirim ve Arama Kanallari
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
           
           # Portföy ve Piyasa Ayarlari
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
@@ -77,19 +73,19 @@ jobs:
           REPORT_TYPE: ${{ vars.REPORT_TYPE || secrets.REPORT_TYPE || 'simple' }}
           TRADING_DAY_CHECK_ENABLED: ${{ vars.TRADING_DAY_CHECK_ENABLED || secrets.TRADING_DAY_CHECK_ENABLED || 'true' }}
           
-          # KRITIK HIZ AYARI: Yahoo Finance (yfinance) en basa alindi
-          REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'yfinance,tencent,akshare_sina,efinance' }}
+          # SADECE YAHOO FINANCE: Cin sunuculari tamamen cikarildi.
+          REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'yfinance' }}
           LOG_LEVEL: INFO
           
         run: |
-          # Calisma Modu ve Zorlama Ayari
+          # Calisma Modu Belirleme
           MODE="${{ github.event.inputs.mode || 'full' }}"
           FORCE_RUN_ARG=""
           if [ "${{ github.event.inputs.force_run }}" = "true" ]; then
             FORCE_RUN_ARG="--force-run"
           fi
 
-          echo "🚀 Analiz Baslatiliyor... Mod: $MODE"
+          echo "🚀 Analiz Baslatiliyor (Yfinance Odakli)..."
           
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review $FORCE_RUN_ARG
@@ -99,7 +95,7 @@ jobs:
             python main.py $FORCE_RUN_ARG
           fi
       
-      - name: Analiz Raporlarini Yukle (Artifacts)
+      - name: Raporlari Yukle (Artifacts)
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -108,11 +104,3 @@ jobs:
             reports/
             logs/
           retention-days: 30
-
-      - name: Sonucu Ekrana Yazdir
-        if: always()
-        run: |
-          echo "=========================================="
-          echo "📊 Analiz Islemi Tamamlandi"
-          echo "=========================================="
-          ls -R reports/ 2>/dev/null || echo "⚠️ Rapor dosyasi bulunamadi."
