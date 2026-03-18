@@ -1,27 +1,26 @@
-name: Stock Analysis
+name: Hisse Senedi Akilli Analiz Sistemi
 
 on:
   schedule:
     - cron: '0 10 * * 1-5'
-  # Manuel Tetikleme Yapılandırması
+  # Manuel Tetikleme Yapilandirmasi
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Çalışma Modu'
+        description: 'Calisma Modu'
         required: true
         default: 'full'
         type: choice
         options:
           - full          # Tam Analiz (Hisse + Piyasa)
-          - market-only   # Sadece Piyasa Özeti
+          - market-only   # Sadece Piyasa Ozeti
           - stocks-only   # Sadece Hisse Analizi
       force_run:
-        description: 'Zorla Çalıştır (İş günü kontrolünü atla)'
+        description: 'Zorla Calistir (Is günü kontrolünü atla)'
         required: false
         default: false
         type: boolean
 
-# Eşzamanlılık Kontrolü: Aynı anda sadece bir analiz görevi çalışır
 concurrency:
   group: stock-analysis
   cancel-in-progress: false
@@ -29,82 +28,39 @@ concurrency:
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    # Zaman aşımı sınırı (30 dakika)
     timeout-minutes: 30
     
     steps:
-      - name: Rastgele Gecikme (Sabit zamanlı erişimi önlemek için)
-        run: sleep $((RANDOM % 60))  # 0-60 saniye arası rastgele gecikme
+      - name: Rastgele Gecikme
+        run: sleep $((RANDOM % 60))
       
-      - name: Kodu Çek (Checkout)
+      - name: Kodu Cek
         uses: actions/checkout@v5
       
-      - name: Python Ortamını Kur
+      - name: Python Ortamini Kur
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: Bağımlılıkları Yükle
+      - name: Bagimliliklari Yukle
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Gerekli Dizinleri Oluştur
-        run: |
-          mkdir -p data logs reports
+      - name: Dizinleri Olustur
+        run: mkdir -p data logs reports
       
-      - name: Hisse Analizini Gerçekleştir
+      - name: Analizi Gerceklestir
         env:
-          # ==========================================
-          # AI Yapılandırması
-          # ==========================================
           LITELLM_CONFIG: ${{ vars.LITELLM_CONFIG || secrets.LITELLM_CONFIG }}
           LITELLM_CONFIG_YAML: ${{ vars.LITELLM_CONFIG_YAML || secrets.LITELLM_CONFIG_YAML }}
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
           LITELLM_MODEL: ${{ vars.LITELLM_MODEL || secrets.LITELLM_MODEL }}
-
-          # Gemini AI (Ana Seçenek)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-1.5-flash' }}
           GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-1.5-pro' }}
           GEMINI_REQUEST_DELAY: '3.0'
-          
-          # Diğer AI Seçenekleri
-          AIHUBMIX_KEY: ${{ secrets.AIHUBMIX_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || secrets.OPENAI_BASE_URL }}
-          OPENAI_MODEL: ${{ vars.OPENAI_MODEL || secrets.OPENAI_MODEL }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL || secrets.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022' }}
-
-          # ==========================================
-          # Veri Kaynakları ve Arama
-          # ==========================================
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          BOCHA_API_KEYS: ${{ secrets.BOCHA_API_KEYS }}
-          TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
-          SERPAPI_API_KEYS: ${{ secrets.SERPAPI_API_KEYS }}
-          MINIMAX_API_KEYS: ${{ secrets.MINIMAX_API_KEYS }}
-          BRAVE_API_KEYS: ${{ secrets.BRAVE_API_KEYS }}
-          SEARXNG_BASE_URLS: ${{ secrets.SEARXNG_BASE_URLS }}
-          
-          # ==========================================
-          # Bildirim Kanalları
-          # ==========================================
-          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
-          WECHAT_MSG_TYPE: ${{ vars.WECHAT_MSG_TYPE || secrets.WECHAT_MSG_TYPE || 'markdown' }}
-          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          EMAIL_SENDER: ${{ vars.EMAIL_SENDER || secrets.EMAIL_SENDER }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          EMAIL_RECEIVERS: ${{ vars.EMAIL_RECEIVERS || secrets.EMAIL_RECEIVERS }}
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-
-          # ==========================================
-          # Takip Listesi ve Sistem Ayarları
-          # ==========================================
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
           MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'us' }}
           REPORT_TYPE: ${{ vars.REPORT_TYPE || secrets.REPORT_TYPE || 'simple' }}
@@ -113,33 +69,12 @@ jobs:
           REALTIME_SOURCE_PRIORITY: ${{ vars.REALTIME_SOURCE_PRIORITY || 'tencent,akshare_sina,efinance,akshare_em' }}
           
         run: |
-          # LiteLLM Yapılandırmasını İşle
-          if [ -n "$LITELLM_CONFIG_YAML" ] && [ -n "$LITELLM_CONFIG" ]; then
-            echo "📝 Yapılandırma dosyası kullanılıyor..."
-            mkdir -p "$(dirname "$LITELLM_CONFIG")"
-            echo "$LITELLM_CONFIG_YAML" > "$LITELLM_CONFIG"
-            echo "✅ LITELLM Yapılandırması yazıldı: $LITELLM_CONFIG"
-          fi
-
-          # Çalışma Modunu Belirle
           MODE="${{ github.event.inputs.mode || 'full' }}"
-          
-          echo "=========================================="
-          echo "🚀 Hisse Senedi Akıllı Analiz Sistemi"
-          echo "=========================================="
-          echo "⏰ Zaman: $(date '+%Y-%m-%d %H:%M:%S')"
-          echo "🎯 Çalışma Modu: $MODE"
-          echo "📊 Takip Listesi Yüklendi"
-          echo ""
-
-          # Zorla Çalıştırma Parametresi
           FORCE_RUN_ARG=""
           if [ "${{ github.event.inputs.force_run }}" = "true" ]; then
             FORCE_RUN_ARG="--force-run"
-            echo "⚡ Zorla çalıştırma modu etkin (İş günü kontrolü atlanıyor)"
           fi
 
-          # Analizi Başlat
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review $FORCE_RUN_ARG
           elif [ "$MODE" = "stocks-only" ]; then
@@ -148,7 +83,7 @@ jobs:
             python main.py $FORCE_RUN_ARG
           fi
       
-      - name: Analiz Raporlarını Yükle (Artifacts)
+      - name: Raporlari Yukle
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -157,17 +92,3 @@ jobs:
             reports/
             logs/
           retention-days: 30
-      
-      - name: Çalışma Sonuçlarını Göster
-        if: always()
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "📊 Analiz Tamamlandı"
-          echo "=========================================="
-          if [ -d "reports" ] && [ "$(ls -A reports 2>/dev/null)" ]; then
-            echo "Oluşturulan Raporlar:"
-            ls -la reports/
-          else
-            echo "⚠️ Rapor dosyası oluşturulamadı"
-          fi
