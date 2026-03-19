@@ -21,89 +21,77 @@ def fetch_stock_data(code, session):
         if res.status_code != 200: return None
         data = res.json()
         result = data['chart']['result'][0]
-        # None (boş) fiyatları temizle
         prices = [p for p in result['indicators']['quote'][0]['close'] if p is not None]
         if len(prices) < 2: return None
         return {
-            'code': code,
-            'name': result['meta'].get('symbol', code),
+            'code': code, 'name': result['meta'].get('symbol', code),
             'price': round(prices[-1], 2),
             'change': round(((prices[-1] - prices[-2]) / prices[-2]) * 100, 2)
         }
     except: return None
 
-# --- 3. GOOGLE RESMİ SDK ANALİZÖR ---
+# --- 3. AKILLI AI ANALİZÖRÜ (404 SAVAR) ---
 def analyze_with_google(data, api_key):
-    try:
-        genai.configure(api_key=api_key)
-        # 404 hatasını önlemek için resmi model ismi
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        prompt = f"""Sen Peter Lynch tarzı uzman bir borsa analistisin. 
-Hisse: {data['name']} ({data['code']}) | Fiyat: {data['price']} | Değişim: %{data['change']}
-Bu verileri Lynch kriterlerine (PEG, büyüme potansiyeli, borç durumu) göre analiz et. 
-Türkçe yanıtla. SADECE JSON formatında şu yapıyı döndür:
-{{
-  "score": 80,
-  "advice": "Al/Tut/Sat",
-  "summary": "Kısa ve öz analiz sonucu",
-  "reason": "Neden bu kararı verdiğinin Lynch kriteriyle açıklaması",
-  "risk": "Hisse için en kritik risk faktörü",
-  "peg": "Tahmini PEG oranı"
-}}"""
-
-        response = model.generate_content(prompt)
-        # Markdown bloklarını temizle
-        raw_text = response.text.replace('```json', '').replace('```', '').strip()
-        d = json.loads(repair_json(raw_text))
-        
-        return AnalysisResult(
-            data['code'], data['name'], 
-            d.get('score', 50), d.get('advice', 'Gözlem'), 
-            d.get('summary', ''), d.get('reason', ''), 
-            d.get('risk', ''), d.get('peg', 'N/A')
-        )
-    except Exception as e:
-        return AnalysisResult(data['code'], data['name'], reason=f"Google AI Hatası: {str(e)[:50]}")
+    genai.configure(api_key=api_key)
+    # 2026 için en olası model isimleri (Sırasıyla denenecek)
+    models_to_try = ['gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-pro', 'gemini-1.0-pro']
+    
+    last_error = ""
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). 
+            Fiyat: {data['price']}, Değişim: %{data['change']}. 
+            Türkçe analiz et. SADECE JSON döndür:
+            {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
+            
+            response = model.generate_content(prompt)
+            raw_text = response.text.replace('```json', '').replace('```', '').strip()
+            d = json.loads(repair_json(raw_text))
+            
+            return AnalysisResult(
+                data['code'], data['name'], d.get('score', 50), d.get('advice', 'Gözlem'),
+                d.get('summary', ''), d.get('reason', ''), d.get('risk', ''), d.get('peg', 'N/A')
+            )
+        except Exception as e:
+            last_error = str(e)
+            continue # Hata verirse bir sonraki modeli dene
+            
+    return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {last_error[:50]}")
 
 # --- 4. ANA AKIŞ ---
 def main():
     os.makedirs("reports", exist_ok=True)
     api_key = os.getenv("GEMINI_API_KEY")
-    stock_input = os.getenv("STOCK_LIST", "ASELS.IS,ASTOR.IS,THYAO.IS,TUPRS.IS")
+    stock_input = os.getenv("STOCK_LIST", "ASELS.IS,ASTOR.IS,THYAO.IS,TUPRS.IS,YUNSA.IS")
     stock_codes = [s.strip().upper() for s in stock_input.split(',') if s.strip()]
     
     session = cur_requests.Session()
     results = []
     
-    print(f"🚀 Operasyon Başlıyor: {stock_codes}")
+    print(f"🚀 Analiz Başlıyor (Dr. Ömer Özel)...")
     for code in stock_codes:
         data = fetch_stock_data(code, session)
         if data:
             res = analyze_with_google(data, api_key)
             if res: results.append(res)
-        time.sleep(1.5) # IP blokajı riskine karşı güvenlik molası
+        time.sleep(1)
 
-    # RAPOR OLUŞTURMA
     now = datetime.now().strftime('%d-%m-%Y %H:%M')
     report = f"## 📈 Dr. Ömer - Stratejik Karar Panosu ({now})\n\n"
     if results:
         report += "| Hisse | Öneri | Puan | PEG | Temel Risk |\n| :--- | :--- | :--- | :--- | :--- |\n"
         for r in results:
             report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} | {r.risk[:25]}... |\n"
-        
         report += "\n---\n### 🔍 Peter Lynch Analiz Detayları\n"
         for r in results:
-            report += f"#### 🔹 {r.name} ({r.code})\n"
-            report += f"- **Strateji:** {r.reason}\n"
-            report += f"- **Analiz:** {r.summary}\n"
-            report += f"- **Kritik Risk:** {r.risk}\n\n---\n"
+            report += f"#### 🔹 {r.name} ({r.code})\n- **Strateji:** {r.reason}\n- **Analiz:** {r.summary}\n- **Risk:** {r.risk}\n\n---\n"
     else:
-        report += "⚠️ Veri çekilemedi. API anahtarını veya hisse listesini kontrol edin."
+        report += "⚠️ Veri çekilemedi. API anahtarınızı (GEMINI_API_KEY) kontrol edin."
 
     with open("reports/rapor.md", "w", encoding="utf-8") as f:
         f.write(report)
-    print("✅ Rapor Başarıyla Oluşturuldu.")
+    print("✅ Bitti.")
 
 if __name__ == "__main__":
     main()
