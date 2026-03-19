@@ -4,19 +4,22 @@ on:
   workflow_dispatch:
 
 env:
+  # Node.js 24 uyarısını ve takvim hatalarını kapatan ayarlar
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PYTHONPATH: ${{ github.workspace }}
-  # BİST hisseleri için bölge kısıtlamalarını eziyoruz
   TRADING_DAY_CHECK: 'false'
-  DEFAULT_MARKET: 'US'
-  MARKET_REGION: 'US'
+  DEFAULT_MARKET: 'tr'
+  MARKET_REGION: 'tr'
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Kodu Çek
+        uses: actions/checkout@v4
+      
+      - name: Python Kur
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -24,15 +27,21 @@ jobs:
       - name: Kütüphaneleri Yükle
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          # En kritik kütüphanelerin yüklendiğinden emin oluyoruz
+          pip install yfinance requests litellm json-repair markdown2 --upgrade
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Analizi Gerçekleştir
         env:
+          # --- KRİTİK AYARLAR ---
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
+          # Değişken boşsa diye buraya hisseleri manuel sabitledik:
+          STOCK_LIST: "ASELS.IS,ASTOR.IS,THYAO.IS,TUPRS.IS,YUNSA.IS"
+          REALTIME_SOURCE_PRIORITY: 'yfinance'
         run: |
           mkdir -p reports
-          python main.py
+          # Çince piyasa özetini atlayıp doğrudan analize geçiyoruz
+          python main.py --no-market-review --force-run
 
       - name: Raporu Summary Kısmına Yaz
         if: always()
@@ -40,7 +49,9 @@ jobs:
           LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
           if [ -f "$LATEST_REPORT" ]; then
             echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" > $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ❌ Hata: Analiz Yapıldı Ama Rapor Oluşturulamadı" >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Hata: Rapor Oluşturulamadı" >> $GITHUB_STEP_SUMMARY
+            echo "Hisse listesi veya API bağlantısı kontrol edilmelidir." >> $GITHUB_STEP_SUMMARY
           fi
