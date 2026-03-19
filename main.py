@@ -4,7 +4,7 @@ from datetime import datetime
 import yfinance as yf
 from src.config import setup_env, get_config
 from src.logging_config import setup_logging
-from src.analyzer import GeminiAnalyzer, AnalysisResult
+from src.analyzer import GeminiAnalyzer
 
 def main():
     setup_env()
@@ -29,47 +29,34 @@ def main():
         try:
             logger.info(f"🔍 Veri çekiliyor: {code}")
             ticker = yf.Ticker(code)
-            # Son 5 günlük veriyi al (Teknik analiz için yeterli)
             hist = ticker.history(period="5d")
             info = ticker.info
             
             if hist.empty:
-                logger.warning(f"⚠️ {code} için veri bulunamadı.")
+                logger.warning(f"⚠️ {code} verisi boş.")
                 continue
 
-            # Gemini için veri paketini hazırla
-            current_price = hist['Close'].iloc[-1]
-            change_pct = ((current_price - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100
-            
             context = {
                 'code': code,
                 'stock_name': info.get('longName', code),
-                'today': {
-                    'close': round(current_price, 2),
-                    'pct_chg': round(change_pct, 2),
-                    'volume': hist['Volume'].iloc[-1]
-                },
-                'realtime': {
-                    'pe_ratio': info.get('trailingPE', 'N/A'),
-                    'market_cap': info.get('marketCap', 'N/A')
-                }
+                'today': {'close': hist['Close'].iloc[-1]},
+                'realtime': {'pe_ratio': info.get('trailingPE', 'N/A')}
             }
             
-            # AI Analizini Başlat
-            logger.info(f"🧠 AI Analiz Ediyor: {code}")
+            # AI Analizi
             res = analyzer.analyze(context)
             if res:
                 results.append(res)
 
         except Exception as e:
-            logger.error(f"❌ {code} işlenirken hata: {e}")
+            logger.error(f"❌ {code} hatası: {e}")
 
-    # --- TÜRKÇE RAPOR OLUŞTURMA ---
+    # --- TÜRKÇE RAPOR ---
     now = datetime.now().strftime('%d-%m-%Y %H:%M')
     report = f"## 📈 Dr. Ömer - Stratejik Karar Panosu ({now})\n\n"
     
     if results:
-        report += "| Hisse | Öneri | Puan | Lynch Potansiyel | Risk Faktörü |\n"
+        report += "| Hisse | Öneri | Puan | Lynch Potansiyel | Temel Risk |\n"
         report += "| :--- | :--- | :--- | :--- | :--- |\n"
         for r in results:
             lynch = r.dashboard.get('lynch_metrics', {}) if r.dashboard else {}
@@ -80,13 +67,12 @@ def main():
             report += f"#### 🔹 {r.name} ({r.code})\n"
             report += f"- **Strateji:** {r.buy_reason}\n"
             report += f"- **Risk:** {r.risk_warning}\n"
-            report += f"- **Özet:** {r.analysis_summary}\n\n"
+            report += f"- **Özet:** {r.analysis_summary}\n\n---\n"
     else:
-        report += "⚠️ Hiçbir hisse için veri çekilemedi. Lütfen hisse kodlarını (Örn: `THYAO.IS`) kontrol edin."
+        report += "⚠️ Veri çekilemedi veya AI analizi başarısız oldu."
 
     with open(os.path.join("reports", "rapor.md"), "w", encoding="utf-8") as f:
         f.write(report)
-    
     return 0
 
 if __name__ == "__main__":
