@@ -21,10 +21,11 @@ on:
         type: boolean
 
 env:
+  # GitHub Runner Altyapi Ayarlari
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # SISTEM GENEL DIL AYARI
-  LANGUAGE: 'Turkish'
-  REPORT_LANGUAGE: 'Turkish'
+  LANG: tr_TR.UTF-8
+  LC_ALL: tr_TR.UTF-8
+  LANGUAGE: Turkish
 
 concurrency:
   group: stock-analysis
@@ -60,24 +61,30 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
           
-          # KRITIK: Gemini'ye raporu Turkce yazmasini emreden ayarlar
+          # DIL ZORLAMA: Her bir degiskeni ayri ayri Turkceye sabitliyoruz
           LANGUAGE: 'Turkish'
           REPORT_LANGUAGE: 'Turkish'
+          OUTPUT_LANGUAGE: 'Turkish'
           ANALYSIS_LANGUAGE: 'Turkish'
+          PROMPT_LANGUAGE: 'Turkish'
           
-          # HIZ AYARI
+          # HIZ VE ANALIZ AYARLARI
           REALTIME_SOURCE_PRIORITY: 'yfinance'
           GEMINI_REQUEST_DELAY: '2.0'
           LOG_LEVEL: INFO
           
         run: |
+          # Ortam degiskenlerini shell seviyesinde de zorla
+          export LANGUAGE=Turkish
+          export REPORT_LANGUAGE=Turkish
+          
           MODE="${{ github.event.inputs.mode || 'full' }}"
           FORCE_RUN_ARG=""
           if [ "${{ github.event.inputs.force_run }}" = "true" ]; then
             FORCE_RUN_ARG="--force-run"
           fi
 
-          echo "🚀 Analiz Baslatiliyor (Dil: Turkce)..."
+          echo "🚀 Analiz Baslatiliyor... Hedef Dil: Turkce"
           
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review $FORCE_RUN_ARG
@@ -87,23 +94,13 @@ jobs:
             python main.py $FORCE_RUN_ARG
           fi
       
-      - name: Raporlari Yukle (Artifacts)
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: analiz-raporlari-${{ github.run_number }}
-          path: |
-            reports/
-            logs/
-          retention-days: 30
-
       - name: Raporu Summary Kisminda Goster
         if: always()
         run: |
           LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
           if [ -f "$LATEST_REPORT" ]; then
-            # Raporun basligini Turkce olarak summary'e ekle
             echo "### 📊 Hisse Senedi Akıllı Analiz Raporu" >> $GITHUB_STEP_SUMMARY
+            echo "> **Not:** Eger tablo basliklari hala Cince ise, sistemin ana kodlarindaki sabit kelimelerin cevirilmesi gerekebilir." >> $GITHUB_STEP_SUMMARY
             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
             echo "### ⚠️ Rapor Dosyasi Bulunamadi" >> $GITHUB_STEP_SUMMARY
