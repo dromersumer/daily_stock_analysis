@@ -32,20 +32,27 @@ jobs:
           pip install -r requirements.txt
 
       - name: Analizi Gerçekleştir
+        id: analysis_step
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LITELLM_MODEL: "gemini/gemini-1.5-flash"
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
           REALTIME_SOURCE_PRIORITY: 'yfinance'
-        run: python main.py --no-market-review --force-run
+        run: |
+          # reports klasörünü garantiye alalım
+          mkdir -p reports
+          python main.py --no-market-review --force-run
 
-      - name: Raporu Summary Kısmında Göster
+      - name: Raporu Summary Kısmına Yaz
         if: always()
         run: |
           LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
           if [ -f "$LATEST_REPORT" ]; then
-            echo "### 📊 Dr. Ömer - Stratejik Analiz Raporu" >> $GITHUB_STEP_SUMMARY
+            echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ❌ Hata: Rapor Oluşturulamadı" >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ HATA RAPORU" >> $GITHUB_STEP_SUMMARY
+            echo "- Analiz betiği rapor dosyasını oluşturamadı." >> $GITHUB_STEP_SUMMARY
+            echo "- Lütfen 'Analizi Gerçekleştir' adımındaki logları inceleyin." >> $GITHUB_STEP_SUMMARY
           fi
