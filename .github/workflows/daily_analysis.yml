@@ -3,7 +3,7 @@ name: Hisse Senedi Akilli Analiz Sistemi
 on:
   schedule:
     - cron: '0 10 * * 1-5'
-  # Manuel Tetikleme Yapilandirmasi (Mavi "Run workflow" Butonu)
+  # Manuel Tetikleme Yapilandirmasi (Mavi Buton)
   workflow_dispatch:
     inputs:
       mode:
@@ -12,16 +12,19 @@ on:
         default: 'full'
         type: choice
         options:
-          - full          # Tam Analiz (Hisse + Piyasa)
+          - full          # Tam Analiz
           - market-only   # Sadece Piyasa Ozeti
           - stocks-only   # Sadece Hisse Analizi
       force_run:
-        description: 'Zorla Calistir (Is günü kontrolünü atla)'
+        description: 'Zorla Calistir'
         required: false
         default: false
         type: boolean
 
-# Ayni anda birden fazla analiz calismasini engeller
+# Node.js 24 gecisini zorlayarak uyarilari engeller
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 concurrency:
   group: stock-analysis
   cancel-in-progress: false
@@ -33,10 +36,10 @@ jobs:
     
     steps:
       - name: Kodu Cek (Checkout)
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
       
       - name: Python Ortamini Kur
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -51,40 +54,25 @@ jobs:
       
       - name: Analizi Gerceklestir
         env:
-          # AI Yapilandirmasi (Gemini)
+          # AI ve Veri Kaynagi Ayarlari
           LITELLM_CONFIG: ${{ vars.LITELLM_CONFIG || secrets.LITELLM_CONFIG }}
-          LITELLM_CONFIG_YAML: ${{ vars.LITELLM_CONFIG_YAML || secrets.LITELLM_CONFIG_YAML }}
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
-          LITELLM_MODEL: ${{ vars.LITELLM_MODEL || secrets.LITELLM_MODEL }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || secrets.GEMINI_MODEL || 'gemini-1.5-flash' }}
-          GEMINI_MODEL_FALLBACK: ${{ vars.GEMINI_MODEL_FALLBACK || secrets.GEMINI_MODEL_FALLBACK || 'gemini-1.5-pro' }}
-          GEMINI_REQUEST_DELAY: '2.0'
-          
-          # Bildirim Kanallari (Opsiyonel)
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          
-          # Portföy ve Piyasa Ayarlari
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
-          MARKET_REVIEW_REGION: ${{ vars.MARKET_REVIEW_REGION || secrets.MARKET_REVIEW_REGION || 'us' }}
-          REPORT_TYPE: ${{ vars.REPORT_TYPE || secrets.REPORT_TYPE || 'simple' }}
-          TRADING_DAY_CHECK_ENABLED: ${{ vars.TRADING_DAY_CHECK_ENABLED || secrets.TRADING_DAY_CHECK_ENABLED || 'true' }}
           
-          # HIZ VE VERI KAYNAGI AYARI:
-          # Sadece Yahoo Finance kullanilir. Cin sunuculari (Tencent, Sina vb.) devre disidir.
+          # HIZ AYARI: Sadece Yahoo Finance odakli
           REALTIME_SOURCE_PRIORITY: 'yfinance'
+          GEMINI_REQUEST_DELAY: '2.0'
           LOG_LEVEL: INFO
           
         run: |
-          # Calisma Modu ve Zorlama Ayari
           MODE="${{ github.event.inputs.mode || 'full' }}"
           FORCE_RUN_ARG=""
           if [ "${{ github.event.inputs.force_run }}" = "true" ]; then
             FORCE_RUN_ARG="--force-run"
           fi
 
-          echo "🚀 Analiz Baslatiliyor: Yahoo Finance üzerinden veriler cekiliyor..."
+          echo "🚀 Analiz Baslatiliyor..."
           
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review $FORCE_RUN_ARG
@@ -94,7 +82,7 @@ jobs:
             python main.py $FORCE_RUN_ARG
           fi
       
-      - name: Analiz Raporlarini Yukle (Artifacts)
+      - name: Raporlari Sisteme Yukle (Artifacts)
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -104,9 +92,16 @@ jobs:
             logs/
           retention-days: 30
 
-      - name: İslem Ozeti
+      - name: Raporu Summary Kisminda Goster
         if: always()
         run: |
-          echo "=========================================="
-          echo "📊 Analiz Tamamlandi!"
-          echo "=========================================="
+          # Olusan en son Markdown (.md) rapor dosyasini bulur
+          LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
+          
+          if [ -f "$LATEST_REPORT" ]; then
+            echo "### 📊 Hisse Senedi Analiz Raporu" >> $GITHUB_STEP_SUMMARY
+            cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ⚠️ Rapor Dosyasi Bulunamadi" >> $GITHUB_STEP_SUMMARY
+            echo "Analiz tamamlanmis olabilir ancak rapor dosyasi okunurken bir sorun olustu." >> $GITHUB_STEP_SUMMARY
+          fi
