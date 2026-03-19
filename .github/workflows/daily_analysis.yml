@@ -3,6 +3,14 @@ name: Hisse Senedi Akilli Analiz Sistemi
 on:
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  PYTHONPATH: ${{ github.workspace }}
+  # BİST hisseleri için bölge kısıtlamalarını eziyoruz
+  TRADING_DAY_CHECK: 'false'
+  DEFAULT_MARKET: 'US'
+  MARKET_REGION: 'US'
+
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -16,7 +24,6 @@ jobs:
       - name: Kütüphaneleri Yükle
         run: |
           pip install --upgrade pip
-          pip install yfinance requests litellm json-repair --upgrade
           pip install -r requirements.txt
 
       - name: Analizi Gerçekleştir
@@ -35,5 +42,5 @@ jobs:
             echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" > $GITHUB_STEP_SUMMARY
             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ❌ Hata: Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Hata: Analiz Yapıldı Ama Rapor Oluşturulamadı" >> $GITHUB_STEP_SUMMARY
           fi
