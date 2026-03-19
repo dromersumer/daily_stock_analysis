@@ -5,7 +5,6 @@ on:
 
 env:
   PYTHONPATH: ${{ github.workspace }}
-  TRADING_DAY_CHECK: 'false'
 
 jobs:
   analyze:
@@ -34,9 +33,15 @@ jobs:
         if: always()
         run: |
           LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
-          if [ -f "$LATEST_REPORT" ]; then
-            echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" > $GITHUB_STEP_SUMMARY
-            cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
+          if [ -f "$Short_Report" ]; then # Küçük bir düzeltme: rapor.md
+             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ❌ Hata: Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
+             # En son üretilen herhangi bir md dosyasını bul
+             REPORT_FILE=$(find reports -name "*.md" | head -n 1)
+             if [ -n "$REPORT_FILE" ]; then
+                echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" > $GITHUB_STEP_SUMMARY
+                cat "$REPORT_FILE" >> $GITHUB_STEP_SUMMARY
+             else
+                echo "### ❌ Hata: Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
+             fi
           fi
