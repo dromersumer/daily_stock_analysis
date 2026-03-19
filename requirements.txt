@@ -1,22 +1,25 @@
-# --- Sistem ve Veri ---
+# --- Temel Sistem ve Konfigürasyon ---
 python-dotenv>=1.0.0
 tenacity>=8.2.0
 pandas>=2.0.0
 numpy>=1.24.0
 PyYAML>=6.0
 
-# --- Veri Kaynakları (BİST Uyumluluğu İçin) ---
+# --- Veri Çekme (Yahoo Engelini Aşan Yeni Nesil Set) ---
+# Yahoo Finance'in GitHub engeline karşı en kritik kütüphane
+curl_cffi>=0.6.2
 yfinance>=0.2.40
 requests>=2.31.0
 fake-useragent>=1.4.0
 
-# --- AI Motoru ve JSON Tamiri ---
+# --- AI Analiz ve JSON Yönetimi ---
+# Gemini 1.5 Flash modelini en kararlı çalıştıran sürüm
 litellm>=1.40.0
 json-repair>=0.25.0
 openai>=1.0.0
 tiktoken>=0.8.0
 
-# --- Raporlama ---
+# --- Raporlama ve Formatlama ---
 markdown2>=2.4.0
 jinja2>=3.1.0
 lxml>=4.9.0
