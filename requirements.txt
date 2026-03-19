@@ -1,26 +1,23 @@
-# --- Temel Sistem ve Veri Yönetimi ---
+# --- Sistem ve Veri ---
 python-dotenv>=1.0.0
 tenacity>=8.2.0
-sqlalchemy>=2.0.0
 pandas>=2.0.0
 numpy>=1.24.0
 PyYAML>=6.0
 
-# --- Borsa ve Veri Kaynakları (BİST Uyumluluğu) ---
+# --- Veri Kaynakları (BİST Uyumluluğu İçin) ---
 yfinance>=0.2.40
 requests>=2.31.0
 fake-useragent>=1.4.0
 
-# --- AI Analiz ve JSON Onarımı (Kritik Parçalar) ---
-# Gemini 1.5 Flash bağlantısı için en az 1.40.0 gereklidir
+# --- AI Motoru ve JSON Tamiri ---
 litellm>=1.40.0
 json-repair>=0.25.0
 openai>=1.0.0
 tiktoken>=0.8.0
 
-# --- Raporlama ve Formatlama (Eksik Olanlar Eklendi) ---
+# --- Raporlama ---
 markdown2>=2.4.0
 jinja2>=3.1.0
 lxml>=4.9.0
 lxml_html_clean
-openpyxl>=3.1.0
