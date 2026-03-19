@@ -3,14 +3,6 @@ name: Hisse Senedi Akilli Analiz Sistemi
 on:
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  PYTHONPATH: ${{ github.workspace }}
-  # Çin odaklı tüm kontrolleri devre dışı bırakıyoruz
-  TRADING_DAY_CHECK: 'false'
-  DEFAULT_MARKET: 'US'
-  MARKET_REGION: 'US'
-
 jobs:
   analyze:
     runs-on: ubuntu-latest
@@ -24,18 +16,16 @@ jobs:
       - name: Kütüphaneleri Yükle
         run: |
           pip install --upgrade pip
-          pip install yfinance requests markdown2 json-repair litellm --upgrade
+          pip install yfinance requests litellm json-repair --upgrade
           pip install -r requirements.txt
 
       - name: Analizi Gerçekleştir
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          LITELLM_MODEL: "gemini/gemini-1.5-flash"
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
         run: |
           mkdir -p reports
-          # --no-market-review Çince özeti engeller
-          python main.py --no-market-review --force-run
+          python main.py
 
       - name: Raporu Summary Kısmına Yaz
         if: always()
@@ -45,5 +35,5 @@ jobs:
             echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" > $GITHUB_STEP_SUMMARY
             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ❌ Hata: Analiz Başarılı Ama Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Hata: Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
           fi
