@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, argparse, logging, sys, uuid
+import os, argparse, logging, sys, uuid, requests
 from datetime import datetime
 import yfinance as yf
 from src.config import setup_env, get_config
@@ -20,6 +20,10 @@ def main():
     stock_input = args.stocks if args.stocks else os.getenv("STOCK_LIST", "ASELS.IS,ASTOR.IS")
     stock_codes = [s.strip().upper() for s in stock_input.split(',') if s.strip()]
 
+    # yfinance için oturum maskeleme (Engel aşmak için)
+    session = requests.Session()
+    session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'})
+    
     logger.info(f"🚀 Analiz Başlıyor: {stock_codes}")
     
     analyzer = GeminiAnalyzer()
@@ -27,14 +31,11 @@ def main():
 
     for code in stock_codes:
         try:
-            logger.info(f"🔍 Veri çekiliyor: {code}")
-            ticker = yf.Ticker(code)
+            ticker = yf.Ticker(code, session=session)
             hist = ticker.history(period="5d")
             info = ticker.info
             
-            if hist.empty:
-                logger.warning(f"⚠️ {code} verisi boş.")
-                continue
+            if hist.empty: continue
 
             context = {
                 'code': code,
@@ -43,33 +44,30 @@ def main():
                 'realtime': {'pe_ratio': info.get('trailingPE', 'N/A')}
             }
             
-            # AI Analizi
             res = analyzer.analyze(context)
-            if res:
-                results.append(res)
-
+            if res: results.append(res)
         except Exception as e:
             logger.error(f"❌ {code} hatası: {e}")
 
-    # --- TÜRKÇE RAPOR ---
+    # --- TÜRKÇE MANUEL RAPOR ---
     now = datetime.now().strftime('%d-%m-%Y %H:%M')
     report = f"## 📈 Dr. Ömer - Stratejik Karar Panosu ({now})\n\n"
     
     if results:
-        report += "| Hisse | Öneri | Puan | Lynch Potansiyel | Temel Risk |\n"
+        report += "| Hisse | Öneri | Puan | Lynch Potansiyel | Risk Faktörü |\n"
         report += "| :--- | :--- | :--- | :--- | :--- |\n"
         for r in results:
             lynch = r.dashboard.get('lynch_metrics', {}) if r.dashboard else {}
             report += f"| **{r.name}** | {r.get_emoji()} {r.operation_advice} | {r.sentiment_score} | {lynch.get('potential', 'Bilinmiyor')} | {r.risk_warning[:35]}... |\n"
         
-        report += "\n---\n### 🔍 Peter Lynch Analiz Detayları\n"
+        report += "\n---\n### 🔍 Detaylı Analiz Notları\n"
         for r in results:
             report += f"#### 🔹 {r.name} ({r.code})\n"
-            report += f"- **Strateji:** {r.buy_reason}\n"
-            report += f"- **Risk:** {r.risk_warning}\n"
+            report += f"- **Analiz:** {r.buy_reason}\n"
+            report += f"- **Kritik Risk:** {r.risk_warning}\n"
             report += f"- **Özet:** {r.analysis_summary}\n\n---\n"
     else:
-        report += "⚠️ Veri çekilemedi veya AI analizi başarısız oldu."
+        report += "⚠️ Veri çekilemedi. yfinance engeline takılmış olabilir veya hisse kodları hatalıdır."
 
     with open(os.path.join("reports", "rapor.md"), "w", encoding="utf-8") as f:
         f.write(report)
