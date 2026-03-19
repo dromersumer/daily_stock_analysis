@@ -21,7 +21,7 @@ def fetch_stock_data(code, session):
         if res.status_code != 200: return None
         data = res.json()
         result = data['chart']['result'][0]
-        # Boş (None) fiyatları temizle
+        # None (boş) fiyatları temizle
         prices = [p for p in result['indicators']['quote'][0]['close'] if p is not None]
         if len(prices) < 2: return None
         return {
@@ -32,26 +32,28 @@ def fetch_stock_data(code, session):
         }
     except: return None
 
-# --- 3. GOOGLE RESMİ ANALİZÖR ---
+# --- 3. GOOGLE RESMİ SDK ANALİZÖR ---
 def analyze_with_google(data, api_key):
     try:
         genai.configure(api_key=api_key)
+        # 404 hatasını önlemek için resmi model ismi
         model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""Sen Peter Lynch tarzı uzman bir borsa analistisin. 
 Hisse: {data['name']} ({data['code']}) | Fiyat: {data['price']} | Değişim: %{data['change']}
-Lynch kriterlerine (PEG, büyüme, borç) göre analiz et. Türkçe yanıtla. 
-SADECE JSON döndür:
+Bu verileri Lynch kriterlerine (PEG, büyüme potansiyeli, borç durumu) göre analiz et. 
+Türkçe yanıtla. SADECE JSON formatında şu yapıyı döndür:
 {{
   "score": 80,
   "advice": "Al/Tut/Sat",
-  "summary": "Kısa analiz",
-  "reason": "Lynch kriteri açıklaması",
-  "risk": "Kritik risk",
-  "peg": "Tahmini PEG"
+  "summary": "Kısa ve öz analiz sonucu",
+  "reason": "Neden bu kararı verdiğinin Lynch kriteriyle açıklaması",
+  "risk": "Hisse için en kritik risk faktörü",
+  "peg": "Tahmini PEG oranı"
 }}"""
 
         response = model.generate_content(prompt)
+        # Markdown bloklarını temizle
         raw_text = response.text.replace('```json', '').replace('```', '').strip()
         d = json.loads(repair_json(raw_text))
         
@@ -62,7 +64,7 @@ SADECE JSON döndür:
             d.get('risk', ''), d.get('peg', 'N/A')
         )
     except Exception as e:
-        return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:50]}")
+        return AnalysisResult(data['code'], data['name'], reason=f"Google AI Hatası: {str(e)[:50]}")
 
 # --- 4. ANA AKIŞ ---
 def main():
@@ -74,30 +76,34 @@ def main():
     session = cur_requests.Session()
     results = []
     
-    print(f"🚀 Analiz Başlıyor: {stock_codes}")
+    print(f"🚀 Operasyon Başlıyor: {stock_codes}")
     for code in stock_codes:
         data = fetch_stock_data(code, session)
         if data:
             res = analyze_with_google(data, api_key)
             if res: results.append(res)
-        time.sleep(1)
+        time.sleep(1.5) # IP blokajı riskine karşı güvenlik molası
 
-    # RAPOR YAZMA
+    # RAPOR OLUŞTURMA
     now = datetime.now().strftime('%d-%m-%Y %H:%M')
     report = f"## 📈 Dr. Ömer - Stratejik Karar Panosu ({now})\n\n"
     if results:
         report += "| Hisse | Öneri | Puan | PEG | Temel Risk |\n| :--- | :--- | :--- | :--- | :--- |\n"
         for r in results:
-            report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} | {r.risk[:30]}... |\n"
-        report += "\n### 🔍 Peter Lynch Analiz Detayları\n"
+            report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} | {r.risk[:25]}... |\n"
+        
+        report += "\n---\n### 🔍 Peter Lynch Analiz Detayları\n"
         for r in results:
-            report += f"#### 🔹 {r.name} ({r.code})\n- **Strateji:** {r.reason}\n- **Analiz:** {r.summary}\n- **Risk:** {r.risk}\n\n---\n"
+            report += f"#### 🔹 {r.name} ({r.code})\n"
+            report += f"- **Strateji:** {r.reason}\n"
+            report += f"- **Analiz:** {r.summary}\n"
+            report += f"- **Kritik Risk:** {r.risk}\n\n---\n"
     else:
-        report += "⚠️ Veri çekilemedi. API veya Hisse listesini kontrol edin."
+        report += "⚠️ Veri çekilemedi. API anahtarını veya hisse listesini kontrol edin."
 
     with open("reports/rapor.md", "w", encoding="utf-8") as f:
         f.write(report)
-    print("✅ Rapor hazır.")
+    print("✅ Rapor Başarıyla Oluşturuldu.")
 
 if __name__ == "__main__":
     main()
