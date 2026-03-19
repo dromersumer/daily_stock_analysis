@@ -1,107 +1,51 @@
 name: Hisse Senedi Akilli Analiz Sistemi
 
 on:
-  schedule:
-    - cron: '0 10 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Calisma Modu'
-        required: true
-        default: 'full'
+        description: 'Çalışma Modu'
+        default: 'stocks-only'
         type: choice
-        options:
-          - full
-          - market-only
-          - stocks-only
-      force_run:
-        description: 'Zorla Calistir'
-        required: false
-        default: false
-        type: boolean
+        options: [full, market-only, stocks-only]
 
 env:
-  # GitHub Runner Altyapi Ayarlari
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  LANG: tr_TR.UTF-8
-  LC_ALL: tr_TR.UTF-8
-  LANGUAGE: Turkish
-
-concurrency:
-  group: stock-analysis
-  cancel-in-progress: false
+  PYTHONPATH: ${{ github.workspace }}
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    
     steps:
-      - name: Kodu Cek (Checkout)
+      - name: Kodu Çek
         uses: actions/checkout@v4
       
-      - name: Python Ortamini Kur
+      - name: Python Kur
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      
-      - name: Bagimliliklari Yukle
+
+      - name: Kütüphaneleri Yükle
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-      
-      - name: Gerekli Dizinleri Olustur
-        run: mkdir -p data logs reports
-      
-      - name: Analizi Gerceklestir
-        env:
-          LITELLM_CONFIG: ${{ vars.LITELLM_CONFIG || secrets.LITELLM_CONFIG }}
-          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
-          
-          # DIL ZORLAMA: Her bir degiskeni ayri ayri Turkceye sabitliyoruz
-          LANGUAGE: 'Turkish'
-          REPORT_LANGUAGE: 'Turkish'
-          OUTPUT_LANGUAGE: 'Turkish'
-          ANALYSIS_LANGUAGE: 'Turkish'
-          PROMPT_LANGUAGE: 'Turkish'
-          
-          # HIZ VE ANALIZ AYARLARI
-          REALTIME_SOURCE_PRIORITY: 'yfinance'
-          GEMINI_REQUEST_DELAY: '2.0'
-          LOG_LEVEL: INFO
-          
-        run: |
-          # Ortam degiskenlerini shell seviyesinde de zorla
-          export LANGUAGE=Turkish
-          export REPORT_LANGUAGE=Turkish
-          
-          MODE="${{ github.event.inputs.mode || 'full' }}"
-          FORCE_RUN_ARG=""
-          if [ "${{ github.event.inputs.force_run }}" = "true" ]; then
-            FORCE_RUN_ARG="--force-run"
-          fi
 
-          echo "🚀 Analiz Baslatiliyor... Hedef Dil: Turkce"
-          
-          if [ "$MODE" = "market-only" ]; then
-            python main.py --market-review $FORCE_RUN_ARG
-          elif [ "$MODE" = "stocks-only" ]; then
-            python main.py --no-market-review $FORCE_RUN_ARG
-          else
-            python main.py $FORCE_RUN_ARG
-          fi
-      
-      - name: Raporu Summary Kisminda Goster
+      - name: Analizi Gerçekleştir
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          LITELLM_MODEL: "gemini/gemini-1.5-flash"
+          STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
+          REALTIME_SOURCE_PRIORITY: 'yfinance'
+        run: python main.py --no-market-review --force-run
+
+      - name: Raporu Summary Kısmında Göster
         if: always()
         run: |
           LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
           if [ -f "$LATEST_REPORT" ]; then
-            echo "### 📊 Hisse Senedi Akıllı Analiz Raporu" >> $GITHUB_STEP_SUMMARY
-            echo "> **Not:** Eger tablo basliklari hala Cince ise, sistemin ana kodlarindaki sabit kelimelerin cevirilmesi gerekebilir." >> $GITHUB_STEP_SUMMARY
+            echo "### 📊 Dr. Ömer - Stratejik Analiz Raporu" >> $GITHUB_STEP_SUMMARY
             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ⚠️ Rapor Dosyasi Bulunamadi" >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Hata: Rapor Oluşturulamadı" >> $GITHUB_STEP_SUMMARY
           fi
