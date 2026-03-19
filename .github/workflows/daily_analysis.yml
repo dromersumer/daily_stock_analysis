@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Mod'
+        description: 'Çalışma Modu'
         default: 'stocks-only'
         type: choice
         options: [full, market-only, stocks-only]
@@ -12,10 +12,8 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PYTHONPATH: ${{ github.workspace }}
-  # BİST verileri için Çin odaklı filtreleri devre dışı bırakıyoruz
-  DEFAULT_MARKET: 'US'
-  MARKET_REGION: 'US'
-  TRADING_DAY_CHECK: 'false'
+  DEFAULT_MARKET: 'tr'
+  MARKET_REGION: 'tr'
 
 jobs:
   analyze:
@@ -37,9 +35,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LITELLM_MODEL: "gemini/gemini-1.5-flash"
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
-          # yfinance'i tek kaynak olarak zorluyoruz
           REALTIME_SOURCE_PRIORITY: 'yfinance'
-          YFINANCE_FORCE_ORIGINAL: 'true'
         run: |
           mkdir -p reports
           python main.py --no-market-review --force-run
@@ -49,7 +45,7 @@ jobs:
         run: |
           LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
           if [ -f "$LATEST_REPORT" ]; then
-            echo "### 📊 Dr. Ömer - Stratejik Analiz Raporu" >> $GITHUB_STEP_SUMMARY
+            echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" >> $GITHUB_STEP_SUMMARY
             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
             echo "### ❌ Hata: Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
