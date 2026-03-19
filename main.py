@@ -1,56 +1,64 @@
-name: Hisse Senedi Akilli Analiz Sistemi
+# -*- coding: utf-8 -*-
+import os, argparse, logging, sys, uuid
+from datetime import datetime
+from src.config import setup_env, get_config
+from src.logging_config import setup_logging
+from src.core.pipeline import StockAnalysisPipeline
+from data_provider.base import canonical_stock_code
 
-on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: 'Mod'
-        default: 'stocks-only'
-        type: choice
-        options: [full, market-only, stocks-only]
+def main():
+    setup_env()
+    config = get_config()
+    os.makedirs("reports", exist_ok=True)
+    setup_logging(log_prefix="stock_analysis", log_dir=config.log_dir)
+    
+    logger = logging.getLogger(__name__)
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--stocks', type=str)
+    args, _ = parser.parse_known_args()
+    
+    # Hisseleri alırken .IS uzantısını koru
+    stock_codes = [canonical_stock_code(c) for c in args.stocks.split(',')] if args.stocks else config.stock_list
+    
+    logger.info(f"🚀 Analiz Başlıyor: {len(stock_codes)} Hisse")
+    
+    try:
+        pipeline = StockAnalysisPipeline(config=config, query_id=uuid.uuid4().hex, max_workers=2)
+        # Bildirimleri False yapıyoruz, raporu biz manuel hazırlayacağız
+        results = pipeline.run(stock_codes=stock_codes, send_notification=False)
+        
+        now = datetime.now().strftime('%d-%m-%Y %H:%M')
+        report = f"## 📈 Dr. Ömer - Stratejik Karar Panosu ({now})\n\n"
+        
+        if results:
+            report += "| Hisse | Öneri | Puan | Lynch Potansiyel | Risk Faktörü |\n"
+            report += "| :--- | :--- | :--- | :--- | :--- |\n"
+            
+            for r in results:
+                # İsimdeki Çince "股票" (Hisse) yazısını temizle
+                clean_name = r.name.replace("股票", "").strip()
+                lynch = r.dashboard.get('lynch_metrics', {}) if r.dashboard else {}
+                
+                report += f"| **{clean_name}** | {r.get_emoji()} {r.operation_advice} | {r.sentiment_score} | {lynch.get('potential', 'N/A')} | {r.risk_warning[:35]}... |\n"
+            
+            report += "\n---\n### 🔍 Peter Lynch Analiz Detayları\n"
+            for r in results:
+                clean_name = r.name.replace("股票", "").strip()
+                report += f"#### 🔹 {clean_name} ({r.code})\n"
+                report += f"- **Lynch Stratejisi:** {r.buy_reason}\n"
+                report += f"- **Kritik Uyarı:** {r.risk_warning}\n"
+                report += f"- **Genel Özet:** {r.analysis_summary}\n\n"
+        else:
+            report += "⚠️ Hisse verileri çekilemedi. Lütfen hisse kodlarını kontrol edin."
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  PYTHONPATH: ${{ github.workspace }}
-  # BİST verileri için Çin odaklı filtreleri devre dışı bırakıyoruz
-  DEFAULT_MARKET: 'US'
-  MARKET_REGION: 'US'
-  TRADING_DAY_CHECK: 'false'
+        with open(os.path.join("reports", "rapor.md"), "w", encoding="utf-8") as f:
+            f.write(report)
+            
+        logger.info("✅ Rapor başarıyla oluşturuldu.")
+    except Exception as e:
+        logger.error(f"❌ Hata: {str(e)}")
+        raise e
 
-jobs:
-  analyze:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Kütüphaneleri Yükle
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Analizi Gerçekleştir
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          LITELLM_MODEL: "gemini/gemini-1.5-flash"
-          STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
-          # yfinance'i tek kaynak olarak zorluyoruz
-          REALTIME_SOURCE_PRIORITY: 'yfinance'
-          YFINANCE_FORCE_ORIGINAL: 'true'
-        run: |
-          mkdir -p reports
-          python main.py --no-market-review --force-run
-
-      - name: Raporu Summary Kısmına Yaz
-        if: always()
-        run: |
-          LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
-          if [ -f "$LATEST_REPORT" ]; then
-            echo "### 📊 Dr. Ömer - Stratejik Analiz Raporu" >> $GITHUB_STEP_SUMMARY
-            cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ❌ Hata: Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
-          fi
+if __name__ == "__main__":
+    sys.exit(main())
