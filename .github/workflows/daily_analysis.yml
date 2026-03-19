@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Çalışma Modu'
+        description: 'Mod'
         default: 'stocks-only'
         type: choice
         options: [full, market-only, stocks-only]
@@ -12,19 +12,17 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PYTHONPATH: ${{ github.workspace }}
-  # KRİTİK: Sistemin Çin borsasına odaklanmasını engeller
-  DEFAULT_MARKET: 'tr'
-  MARKET_REGION: 'tr'
+  # BİST verileri için Çin odaklı filtreleri devre dışı bırakıyoruz
+  DEFAULT_MARKET: 'US'
+  MARKET_REGION: 'US'
+  TRADING_DAY_CHECK: 'false'
 
 jobs:
   analyze:
     runs-on: ubuntu-latest
     steps:
-      - name: Kodu Çek
-        uses: actions/checkout@v4
-      
-      - name: Python Kur
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -39,21 +37,20 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LITELLM_MODEL: "gemini/gemini-1.5-flash"
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
-          # Veri çekme önceliğini Yahoo Finance'e veriyoruz
+          # yfinance'i tek kaynak olarak zorluyoruz
           REALTIME_SOURCE_PRIORITY: 'yfinance'
+          YFINANCE_FORCE_ORIGINAL: 'true'
         run: |
           mkdir -p reports
           python main.py --no-market-review --force-run
 
-      - name: Raporu Özet Ekranına Yazdır
+      - name: Raporu Summary Kısmına Yaz
         if: always()
         run: |
           LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
           if [ -f "$LATEST_REPORT" ]; then
-            echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### 📊 Dr. Ömer - Stratejik Analiz Raporu" >> $GITHUB_STEP_SUMMARY
             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ❌ Hata: Analiz Tamamlanamadı" >> $GITHUB_STEP_SUMMARY
-            echo "Analiz süreci bir hata nedeniyle rapor oluşturamadı." >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Hata: Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
           fi
