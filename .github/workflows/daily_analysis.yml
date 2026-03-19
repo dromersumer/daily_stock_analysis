@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Çalışma Modu'
+        description: 'Mod'
         default: 'stocks-only'
         type: choice
         options: [full, market-only, stocks-only]
@@ -12,8 +12,10 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PYTHONPATH: ${{ github.workspace }}
-  DEFAULT_MARKET: 'tr'
-  MARKET_REGION: 'tr'
+  # BİST hisseleri için bölgeyi ABD/Global moduna alıyoruz
+  DEFAULT_MARKET: 'US'
+  MARKET_REGION: 'US'
+  TRADING_DAY_CHECK: 'false' # Takvim hatasını engellemek için
 
 jobs:
   analyze:
@@ -28,6 +30,8 @@ jobs:
       - name: Kütüphaneleri Yükle
         run: |
           pip install --upgrade pip
+          # yfinance'ın en güncel sürüm olduğundan emin olalım
+          pip install yfinance --upgrade
           pip install -r requirements.txt
 
       - name: Analizi Gerçekleştir
@@ -35,18 +39,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LITELLM_MODEL: "gemini/gemini-1.5-flash"
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
+          # Veri çekme önceliği
           REALTIME_SOURCE_PRIORITY: 'yfinance'
         run: |
           mkdir -p reports
           python main.py --no-market-review --force-run
-
-      - name: Raporu Summary Kısmına Yaz
-        if: always()
-        run: |
-          LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
-          if [ -f "$LATEST_REPORT" ]; then
-            echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" >> $GITHUB_STEP_SUMMARY
-            cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ❌ Hata: Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
-          fi
