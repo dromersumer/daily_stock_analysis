@@ -6,7 +6,7 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PYTHONPATH: ${{ github.workspace }}
-  # BİST hisseleri için bölge kısıtlamalarını tamamen eziyoruz
+  # Çin odaklı tüm kontrolleri devre dışı bırakıyoruz
   TRADING_DAY_CHECK: 'false'
   DEFAULT_MARKET: 'US'
   MARKET_REGION: 'US'
@@ -24,7 +24,7 @@ jobs:
       - name: Kütüphaneleri Yükle
         run: |
           pip install --upgrade pip
-          pip install yfinance requests --upgrade
+          pip install yfinance requests markdown2 json-repair litellm --upgrade
           pip install -r requirements.txt
 
       - name: Analizi Gerçekleştir
@@ -32,10 +32,18 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LITELLM_MODEL: "gemini/gemini-1.5-flash"
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
-          # yfinance'i tek geçiş yolu yap
-          REALTIME_SOURCE_PRIORITY: 'yfinance'
-          # Gecikme ekleyerek bloklanmayı önlemeye çalış
-          GEMINI_REQUEST_DELAY: '2.0'
         run: |
           mkdir -p reports
+          # --no-market-review Çince özeti engeller
           python main.py --no-market-review --force-run
+
+      - name: Raporu Summary Kısmına Yaz
+        if: always()
+        run: |
+          LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
+          if [ -f "$LATEST_REPORT" ]; then
+            echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" > $GITHUB_STEP_SUMMARY
+            cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Hata: Analiz Başarılı Ama Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
+          fi
