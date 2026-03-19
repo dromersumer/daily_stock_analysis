@@ -3,7 +3,6 @@ name: Hisse Senedi Akilli Analiz Sistemi
 on:
   schedule:
     - cron: '0 10 * * 1-5'
-  # Manuel Tetikleme Yapilandirmasi (Mavi Buton)
   workflow_dispatch:
     inputs:
       mode:
@@ -12,18 +11,20 @@ on:
         default: 'full'
         type: choice
         options:
-          - full          # Tam Analiz
-          - market-only   # Sadece Piyasa Ozeti
-          - stocks-only   # Sadece Hisse Analizi
+          - full
+          - market-only
+          - stocks-only
       force_run:
         description: 'Zorla Calistir'
         required: false
         default: false
         type: boolean
 
-# Node.js 24 gecisini zorlayarak uyarilari engeller
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # SISTEM GENEL DIL AYARI
+  LANGUAGE: 'Turkish'
+  REPORT_LANGUAGE: 'Turkish'
 
 concurrency:
   group: stock-analysis
@@ -54,13 +55,17 @@ jobs:
       
       - name: Analizi Gerceklestir
         env:
-          # AI ve Veri Kaynagi Ayarlari
           LITELLM_CONFIG: ${{ vars.LITELLM_CONFIG || secrets.LITELLM_CONFIG }}
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
           
-          # HIZ AYARI: Sadece Yahoo Finance odakli
+          # KRITIK: Gemini'ye raporu Turkce yazmasini emreden ayarlar
+          LANGUAGE: 'Turkish'
+          REPORT_LANGUAGE: 'Turkish'
+          ANALYSIS_LANGUAGE: 'Turkish'
+          
+          # HIZ AYARI
           REALTIME_SOURCE_PRIORITY: 'yfinance'
           GEMINI_REQUEST_DELAY: '2.0'
           LOG_LEVEL: INFO
@@ -72,7 +77,7 @@ jobs:
             FORCE_RUN_ARG="--force-run"
           fi
 
-          echo "🚀 Analiz Baslatiliyor..."
+          echo "🚀 Analiz Baslatiliyor (Dil: Turkce)..."
           
           if [ "$MODE" = "market-only" ]; then
             python main.py --market-review $FORCE_RUN_ARG
@@ -82,7 +87,7 @@ jobs:
             python main.py $FORCE_RUN_ARG
           fi
       
-      - name: Raporlari Sisteme Yukle (Artifacts)
+      - name: Raporlari Yukle (Artifacts)
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -95,13 +100,11 @@ jobs:
       - name: Raporu Summary Kisminda Goster
         if: always()
         run: |
-          # Olusan en son Markdown (.md) rapor dosyasini bulur
           LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
-          
           if [ -f "$LATEST_REPORT" ]; then
-            echo "### 📊 Hisse Senedi Analiz Raporu" >> $GITHUB_STEP_SUMMARY
+            # Raporun basligini Turkce olarak summary'e ekle
+            echo "### 📊 Hisse Senedi Akıllı Analiz Raporu" >> $GITHUB_STEP_SUMMARY
             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
             echo "### ⚠️ Rapor Dosyasi Bulunamadi" >> $GITHUB_STEP_SUMMARY
-            echo "Analiz tamamlanmis olabilir ancak rapor dosyasi okunurken bir sorun olustu." >> $GITHUB_STEP_SUMMARY
           fi
