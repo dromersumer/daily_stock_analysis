@@ -12,10 +12,10 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PYTHONPATH: ${{ github.workspace }}
-  # BİST hisseleri için bölgeyi ABD/Global moduna alıyoruz
+  # Çin Borsası takvim ve bölge kontrollerini tamamen kapatıyoruz
+  TRADING_DAY_CHECK: 'false'
   DEFAULT_MARKET: 'US'
   MARKET_REGION: 'US'
-  TRADING_DAY_CHECK: 'false' # Takvim hatasını engellemek için
 
 jobs:
   analyze:
@@ -30,17 +30,30 @@ jobs:
       - name: Kütüphaneleri Yükle
         run: |
           pip install --upgrade pip
-          # yfinance'ın en güncel sürüm olduğundan emin olalım
-          pip install yfinance --upgrade
           pip install -r requirements.txt
+          pip install yfinance --upgrade
 
       - name: Analizi Gerçekleştir
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LITELLM_MODEL: "gemini/gemini-1.5-flash"
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
-          # Veri çekme önceliği
+          # BİST verileri için yfinance zorunlu
           REALTIME_SOURCE_PRIORITY: 'yfinance'
         run: |
           mkdir -p reports
+          # --no-market-review parametresi ile Çin özetini tamamen siliyoruz
           python main.py --no-market-review --force-run
+
+      - name: Raporu Summary Kısmına Yaz
+        if: always()
+        run: |
+          LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
+          if [ -f "$LATEST_REPORT" ]; then
+            # Önceki içeriği silip taze raporu yazıyoruz
+            echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" > $GITHUB_STEP_SUMMARY
+            cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Hata: Analiz Yapıldı Ama Veri Çekilemedi" >> $GITHUB_STEP_SUMMARY
+            echo "yfinance şu an hisse verilerine ulaşamıyor olabilir. Lütfen hisse kodlarını (Örn: ASELS.IS) kontrol edin." >> $GITHUB_STEP_SUMMARY
+          fi
