@@ -2,20 +2,15 @@ name: Hisse Senedi Akilli Analiz Sistemi
 
 on:
   workflow_dispatch:
-    inputs:
-      mode:
-        description: 'Mod'
-        default: 'stocks-only'
-        type: choice
-        options: [full, market-only, stocks-only]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   PYTHONPATH: ${{ github.workspace }}
-  # Çin Borsası takvim ve bölge kontrollerini tamamen kapatıyoruz
+  # KRİTİK: Tüm market kısıtlamalarını kaldırıyoruz
   TRADING_DAY_CHECK: 'false'
   DEFAULT_MARKET: 'US'
   MARKET_REGION: 'US'
+  ENABLE_DAILY_STOCKS_ONLY: 'true'
 
 jobs:
   analyze:
@@ -30,19 +25,18 @@ jobs:
       - name: Kütüphaneleri Yükle
         run: |
           pip install --upgrade pip
+          pip install yfinance==0.2.40  # Sabit ve stabil sürüm
           pip install -r requirements.txt
-          pip install yfinance --upgrade
 
       - name: Analizi Gerçekleştir
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LITELLM_MODEL: "gemini/gemini-1.5-flash"
           STOCK_LIST: ${{ vars.STOCK_LIST || secrets.STOCK_LIST }}
-          # BİST verileri için yfinance zorunlu
+          # yfinance bağlantısını stabilize ediyoruz
           REALTIME_SOURCE_PRIORITY: 'yfinance'
         run: |
           mkdir -p reports
-          # --no-market-review parametresi ile Çin özetini tamamen siliyoruz
           python main.py --no-market-review --force-run
 
       - name: Raporu Summary Kısmına Yaz
@@ -50,10 +44,9 @@ jobs:
         run: |
           LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
           if [ -f "$LATEST_REPORT" ]; then
-            # Önceki içeriği silip taze raporu yazıyoruz
             echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" > $GITHUB_STEP_SUMMARY
             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ❌ Hata: Analiz Yapıldı Ama Veri Çekilemedi" >> $GITHUB_STEP_SUMMARY
-            echo "yfinance şu an hisse verilerine ulaşamıyor olabilir. Lütfen hisse kodlarını (Örn: ASELS.IS) kontrol edin." >> $GITHUB_STEP_SUMMARY
+            echo "### ❌ Hata: Veri Motoru Yanıt Vermedi" >> $GITHUB_STEP_SUMMARY
+            echo "GitHub sunucuları Yahoo Finance'e şu an erişemiyor olabilir." >> $GITHUB_STEP_SUMMARY
           fi
