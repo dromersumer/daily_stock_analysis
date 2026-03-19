@@ -1,19 +1,12 @@
-# --- Temel Sistem ve Konfigürasyon ---
 python-dotenv>=1.0.0
 tenacity>=8.2.0
 pandas>=2.0.0
 numpy>=1.24.0
 PyYAML>=6.0
-
-# --- Veri Çekme (Yahoo Engelini Aşan Set) ---
-# Yahoo Finance'in GitHub engeline karşı en kritik kütüphane
+# Yahoo engelini aşan Truva Atı:
 curl_cffi>=0.6.2
 requests>=2.31.0
-
-# --- AI Analiz (Resmi Google SDK) ---
-# 404 hatalarını bitiren resmi Google kütüphanesi
+# Resmi Google Beyni (Aracıları kaldırdık):
 google-generativeai>=0.4.0
 json-repair>=0.25.0
-
-# --- Raporlama ---
 markdown2>=2.4.0
