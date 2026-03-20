@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
-import os, sys, json, time
+import os, sys, json, time, smtplib
 from datetime import datetime
 from curl_cffi import requests as cur_requests
 import google.generativeai as genai
 from json_repair import repair_json
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 class AnalysisResult:
     def __init__(self, code, name, score=50, advice="Gözlem", summary="", reason="", risk="", peg="N/A"):
@@ -35,11 +37,7 @@ def analyze_with_google(data, api_key):
         selected_model = next((m for m in available_models if "1.5-flash" in m), available_models[0] if available_models else "models/gemini-1.5-flash")
         
         model = genai.GenerativeModel(selected_model)
-        prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). 
-        Fiyat: {data['price']}, Değişim: %{data['change']}. 
-        Lynch kriterlerine göre (PEG, büyüme, borç) analiz et. Türkçe yanıtla. 
-        SADECE JSON döndür:
-        {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
+        prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). Fiyat: {data['price']}, Değişim: %{data['change']}. Lynch kriterlerine göre (PEG, büyüme, borç) analiz et. Türkçe yanıtla. SADECE JSON döndür: {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
         
         response = model.generate_content(prompt)
         raw_text = response.text.replace('```json', '').replace('```', '').strip()
@@ -52,11 +50,36 @@ def analyze_with_google(data, api_key):
     except Exception as e:
         return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:30]}")
 
+def send_email(report_content):
+    sender_email = "dromersumer@gmail.com"
+    receiver_email = "dromersumer@gmail.com"
+    password = os.getenv("EMAIL_PASSWORD")
+    
+    if not password:
+        print("E-posta şifresi bulunamadı, mail gönderilmedi.")
+        return
+
+    password = password.replace(" ", "") # Aradaki boşlukları temizle
+    msg = MIMEMultipart()
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+    msg['Subject'] = f"📈 Günlük BIST Stratejik Analiz Raporu - {datetime.now().strftime('%d.%m.%Y')}"
+
+    # Maili düz metin formatında ekle
+    msg.attach(MIMEText(report_content, 'plain', 'utf-8'))
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(sender_email, password)
+            server.sendmail(sender_email, receiver_email, msg.as_string())
+        print("✅ E-posta başarıyla gönderildi!")
+    except Exception as e:
+        print(f"❌ E-posta gönderim hatası: {str(e)}")
+
 def main():
     api_key = os.getenv("GEMINI_API_KEY")
     stock_input = os.getenv("STOCK_LIST", "")
     portfolio_type = os.getenv("PORTFOLIO_TYPE", "BIST")
-    
     stock_codes = [s.strip().upper() for s in stock_input.split(',') if s.strip()]
     session = cur_requests.Session()
     results = []
@@ -68,26 +91,27 @@ def main():
             print(f"🧠 {code} analiz ediliyor...")
             res = analyze_with_google(data, api_key)
             results.append(res)
-        time.sleep(12) # Kota dostu bekleme
+        time.sleep(12)
 
-    # RAPOR OLUŞTURMA
-    report = f"## 📈 Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n\n"
-    report += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
+    report = f"Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n"
+    report += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     
     if results:
-        report += "| Hisse | Öneri | Puan | PEG | Temel Risk |\n| :--- | :--- | :--- | :--- | :--- |\n"
         for r in results:
-            report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} | {r.risk[:25]}... |\n"
-        
-        report += "\n---\n### 🔍 Detaylı Peter Lynch Analizleri\n"
-        for r in results:
-            report += f"#### 🔹 {r.name} ({r.code})\n- **Lynch Stratejisi:** {r.reason}\n- **Analiz:** {r.summary}\n- **Kritik Risk:** {r.risk}\n\n---\n"
+            report += f"[{r.code}] {r.name}\n"
+            report += f"Öneri: {r.advice} (Puan: {r.score}) | PEG: {r.peg}\n"
+            report += f"Lynch Stratejisi: {r.reason}\n"
+            report += f"Kritik Risk: {r.risk}\n"
+            report += "-" * 40 + "\n"
     
-    # GITHUB EKRANINA YAZDIRMA (Sihirli Kısım)
+    # GitHub Ekrana Yazdır
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
         with open(summary_file, "a", encoding="utf-8") as f:
-            f.write(report)
+            f.write("```text\n" + report + "\n```")
+            
+    # Mail Gönder
+    send_email(report)
 
 if __name__ == "__main__":
     main()
