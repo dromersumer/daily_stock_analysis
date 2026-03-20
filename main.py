@@ -4,6 +4,8 @@ from datetime import datetime
 from curl_cffi import requests as cur_requests
 import google.generativeai as genai
 from json_repair import repair_json
+import markdown2
+from xhtml2pdf import pisa
 
 # --- 1. VERİ MODELİ ---
 class AnalysisResult:
@@ -34,14 +36,15 @@ def fetch_stock_data(code, session):
 def analyze_with_google(data, api_key):
     try:
         genai.configure(api_key=api_key)
-        # Mevcut modelleri listele ve en iyisini seç
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         prefer_list = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-pro']
         selected_model = next((p for p in prefer_list if p in available_models), available_models[0] if available_models else 'models/gemini-pro')
 
         model = genai.GenerativeModel(selected_model)
-        prompt = f"""Hisse: {data['name']} ({data['code']}). Fiyat: {data['price']}, Değişim: %{data['change']}. 
-        Peter Lynch tarzı analiz et. Türkçe yanıtla. SADECE JSON döndür:
+        prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). 
+        Fiyat: {data['price']}, Değişim: %{data['change']}. 
+        Lynch kriterlerine göre (PEG, büyüme, borç) analiz et. Türkçe yanıtla. 
+        SADECE JSON döndür:
         {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
         
         response = model.generate_content(prompt)
@@ -53,24 +56,42 @@ def analyze_with_google(data, api_key):
             d.get('summary', ''), d.get('reason', ''), d.get('risk', ''), d.get('peg', 'N/A')
         )
     except Exception as e:
-        return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:50]}")
+        return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:30]}")
 
-# --- 4. ANA AKIŞ (HIZ SABİTLEYİCİ EKLENDİ) ---
+# --- 4. PDF DÖNÜŞTÜRÜCÜ ---
+def create_pdf(report_content, output_path):
+    html_content = f"""
+    <html><head><meta charset="UTF-8">
+    <style>
+        body {{ font-family: 'Helvetica', 'Arial', sans-serif; font-size: 10px; color: #333; }}
+        table {{ border-collapse: collapse; width: 100%; margin-top: 15px; }}
+        th, td {{ border: 1px solid #999; padding: 6px; text-align: left; }}
+        th {{ background-color: #2c3e50; color: white; }}
+        h2 {{ color: #d35400; border-bottom: 1px solid #d35400; }}
+        h4 {{ color: #2980b9; margin-top: 15px; }}
+    </style></head>
+    <body>{markdown2.markdown(report_content)}</body></html>
+    """
+    with open(output_path, "w+b") as result_file:
+        pisa.CreatePDF(html_content, dest=result_file)
+
+# --- 5. ANA AKIŞ ---
 def main():
     os.makedirs("reports", exist_ok=True)
     api_key = os.getenv("GEMINI_API_KEY")
-    stock_input = os.getenv("STOCK_LIST", "TUPRS.IS,THYAO.IS,SISE.IS")
-    stock_codes = [s.strip().upper() for s in stock_input.split(',') if s.strip()]
+    stock_input = os.getenv("STOCK_LIST", "")
+    portfolio_type = os.getenv("PORTFOLIO_TYPE", "BIST") # BIST veya ABD
     
+    stock_codes = [s.strip().upper() for s in stock_input.split(',') if s.strip()]
     session = cur_requests.Session()
     results = []
     
-    print(f"🚀 Dr. Ömer için {len(stock_codes)} hisselik operasyon başlıyor...")
+    print(f"🚀 {portfolio_type} Portföyü Analizi Başlıyor ({len(stock_codes)} Hisse)...")
     
     for i, code in enumerate(stock_codes):
-        # --- KRİTİK: Her 5 hissede bir 20 saniye mola (API Kotası Koruması) ---
+        # Rate Limit Koruması (Her 5 hissede mola)
         if i > 0 and i % 5 == 0:
-            print(f"⏳ Kota dolmaması için 20 saniye mola veriliyor ({i}/{len(stock_codes)} tamamlandı)...")
+            print("⏳ API Kotası için 20sn mola...")
             time.sleep(20)
             
         data = fetch_stock_data(code, session)
@@ -79,28 +100,33 @@ def main():
             res = analyze_with_google(data, api_key)
             if res: results.append(res)
         
-        # Her hisse arasında standart 5 saniye bekleme (Yavaş ama güvenli)
-        time.sleep(5)
+        time.sleep(5) # Sabit bekleme
 
-    # Tarih formatı YYYY_MM_DD (Kronolojik sıralama için)
+    # Tarih ve Dosya İsimlendirme (YYYY_MM_DD)
     date_str = datetime.now().strftime('%Y_%m_%d')
-    report_filename = f"reports/Analiz_{date_str}.md"
-
-    # Raporu Oluştur
-    report = f"## 📈 Dr. Ömer - Stratejik Karar Panosu ({datetime.now().strftime('%d-%m-%Y %H:%M')})\n\n"
+    base_name = f"Analiz_{portfolio_type}_{date_str}"
+    
+    # Rapor Hazırlama
+    report = f"## 📈 Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n\n"
+    report += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
+    
     if results:
         report += "| Hisse | Öneri | Puan | PEG | Temel Risk |\n| :--- | :--- | :--- | :--- | :--- |\n"
         for r in results:
             report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} | {r.risk[:25]}... |\n"
-        report += "\n---\n### 🔍 Peter Lynch Analiz Detayları\n"
+        
+        report += "\n---\n### 🔍 Detaylı Peter Lynch Analizleri\n"
         for r in results:
-            report += f"#### 🔹 {r.name} ({r.code})\n- **Strateji:** {r.reason}\n- **Analiz:** {r.summary}\n- **Risk:** {r.risk}\n\n---\n"
+            report += f"#### 🔹 {r.name} ({r.code})\n- **Lynch Stratejisi:** {r.reason}\n- **Analiz:** {r.summary}\n- **Kritik Risk:** {r.risk}\n\n---\n"
     else:
-        report += "⚠️ Veri çekilemedi. Lütfen ayarları kontrol edin."
+        report += "⚠️ Veri çekilemedi. Listeyi ve API anahtarını kontrol edin."
 
-    with open(report_filename, "w", encoding="utf-8") as f:
+    # Markdown ve PDF olarak kaydet
+    with open(f"reports/{base_name}.md", "w", encoding="utf-8") as f:
         f.write(report)
-    print(f"✅ Analiz tamamlandı: {report_filename}")
+    
+    create_pdf(report, f"reports/{base_name}.pdf")
+    print(f"✅ Raporlar Hazır: {base_name}.pdf")
 
 if __name__ == "__main__":
     main()
