@@ -10,38 +10,36 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Kodu Cek
+        uses: actions/checkout@v4
+      
+      - name: Python Kur
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Kütüphaneleri Yükle
+      - name: Kutuphaneleri Yukle
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Analizi Gerçekleştir
+      - name: Analizi Gerceklestir
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          STOCK_LIST: "ASELS.IS,ASTOR.IS,THYAO.IS,TUPRS.IS,YUNSA.IS"
+          # --- DR. ÖMER'İN GÜNCEL PORTFÖY LİSTESİ ---
+          STOCK_LIST: "YUNSA.IS,VBTYZ.IS,UCAYM.IS,TUPRS.IS,TRALT.IS,THYAO.IS,SOKM.IS,SISE.IS,SDTTR.IS,RUZYE.IS,RALYH.IS,OTKAR.IS,ONRYT.IS,ODINE.IS,NETCD.IS,MIATK.IS,KONTR.IS,KATMR.IS,ISMEN.IS,FROTO.IS,ENJSA.IS,EMPAE.IS,DURDO.IS,BIMAS.IS,ASTOR.IS,ASELS.IS,ALTNY.IS,AKSEN.IS"
         run: |
           mkdir -p reports
           python main.py
 
-      - name: Raporu Summary Kısmına Yaz
+      - name: Raporu Summary Kismina Yaz
         if: always()
         run: |
           LATEST_REPORT=$(ls -t reports/*.md 2>/dev/null | head -n 1)
-          if [ -f "$Short_Report" ]; then # Küçük bir düzeltme: rapor.md
-             cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
+          if [ -f "$LATEST_REPORT" ]; then
+            echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" > $GITHUB_STEP_SUMMARY
+            cat "$LATEST_REPORT" >> $GITHUB_STEP_SUMMARY
           else
-             # En son üretilen herhangi bir md dosyasını bul
-             REPORT_FILE=$(find reports -name "*.md" | head -n 1)
-             if [ -n "$REPORT_FILE" ]; then
-                echo "### 📊 Dr. Ömer - Stratejik Analiz Sonuçları" > $GITHUB_STEP_SUMMARY
-                cat "$REPORT_FILE" >> $GITHUB_STEP_SUMMARY
-             else
-                echo "### ❌ Hata: Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
-             fi
+            echo "### ❌ Hata: Rapor Dosyası Bulunamadı" >> $GITHUB_STEP_SUMMARY
           fi
