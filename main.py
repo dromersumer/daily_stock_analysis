@@ -34,16 +34,24 @@ def analyze_with_google(data, api_key):
     try:
         genai.configure(api_key=api_key)
         
-        # SİLDİĞİM AKILLI MODEL SEÇİCİYİ GERİ GETİRDİM (404 HATASINI ÇÖZER)
+        # KESİN ÇÖZÜM: İsim tahmin etme, doğrudan Google'ın verdiği listeden seç.
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        prefer_list = ['models/gemini-1.5-flash-latest', 'models/gemini-1.5-pro-latest', 'models/gemini-pro']
         
-        selected_model = 'gemini-pro' # Eğer hiçbirini bulamazsa en garanti modele geçer
-        for p in prefer_list:
-            if p in available_models:
-                selected_model = p
+        selected_model = None
+        # Önce 'flash' modelini ara (en hızlısı)
+        for m in available_models:
+            if "1.5-flash" in m:
+                selected_model = m
                 break
                 
+        # Eğer flash bulamazsa, listedeki İLK çalışan modeli al
+        if not selected_model and available_models:
+            selected_model = available_models[0]
+            
+        # Hiçbir şey bulamazsa son çare
+        if not selected_model:
+            selected_model = "models/gemini-1.5-flash"
+
         model = genai.GenerativeModel(selected_model)
         
         prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). 
@@ -98,7 +106,7 @@ def main():
             res = analyze_with_google(data, api_key)
             results.append(res)
         
-        # API Kotasına takılmamak için 12 saniyelik mola
+        # Kota aşımını engellemek için 12 saniyelik mola
         time.sleep(12)
 
     date_str = datetime.now().strftime('%Y_%m_%d')
