@@ -89,18 +89,27 @@ def main():
     print(f"🚀 {portfolio_type} Portföyü Analizi Başlıyor ({len(stock_codes)} Hisse)...")
     
     for i, code in enumerate(stock_codes):
-        # Rate Limit Koruması (Her 5 hissede mola)
-        if i > 0 and i % 5 == 0:
-            print("⏳ API Kotası için 20sn mola...")
-            time.sleep(20)
-            
         data = fetch_stock_data(code, session)
         if data:
             print(f"🧠 {code} analiz ediliyor...")
-            res = analyze_with_google(data, api_key)
-            if res: results.append(res)
+            
+            # Rate Limit için Tekrar Deneme Mekanizması
+            max_retries = 3
+            for attempt in range(max_retries):
+                res = analyze_with_google(data, api_key)
+                if "429" in res.reason or "quota" in res.reason.lower() or "exceeded" in res.reason.lower():
+                    if attempt < max_retries - 1:
+                        print(f"⚠️ API Kotası Uyarısı. 20 saniye bekleniyor... (Deneme {attempt+1}/{max_retries})")
+                        time.sleep(20)
+                    else:
+                        results.append(res)
+                else:
+                    results.append(res)
+                    break
         
-        time.sleep(5) # Sabit bekleme
+        # Kesin çözüm: Her hisse sonrası 15 saniye mola (Ücretsiz API'yi güvenli modda çalıştırır)
+        print("⏳ Güvenli API kullanımı için 15 saniye bekleniyor...")
+        time.sleep(15)
 
     # Tarih ve Dosya İsimlendirme (YYYY_MM_DD)
     date_str = datetime.now().strftime('%Y_%m_%d')
