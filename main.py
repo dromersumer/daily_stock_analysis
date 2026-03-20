@@ -30,34 +30,41 @@ def fetch_stock_data(code, session):
         }
     except: return None
 
-# --- 3. AKILLI AI ANALİZÖRÜ (404 SAVAR) ---
+# --- 3. AKILLI AI ANALİZÖRÜ (DYNAMIC MODEL SELECTION) ---
 def analyze_with_google(data, api_key):
-    genai.configure(api_key=api_key)
-    # 2026 için en olası model isimleri (Sırasıyla denenecek)
-    models_to_try = ['gemini-1.5-flash-latest', 'gemini-1.5-flash', 'gemini-pro', 'gemini-1.0-pro']
-    
-    last_error = ""
-    for model_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(model_name)
-            prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). 
-            Fiyat: {data['price']}, Değişim: %{data['change']}. 
-            Türkçe analiz et. SADECE JSON döndür:
-            {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
-            
-            response = model.generate_content(prompt)
-            raw_text = response.text.replace('```json', '').replace('```', '').strip()
-            d = json.loads(repair_json(raw_text))
-            
-            return AnalysisResult(
-                data['code'], data['name'], d.get('score', 50), d.get('advice', 'Gözlem'),
-                d.get('summary', ''), d.get('reason', ''), d.get('risk', ''), d.get('peg', 'N/A')
-            )
-        except Exception as e:
-            last_error = str(e)
-            continue # Hata verirse bir sonraki modeli dene
-            
-    return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {last_error[:50]}")
+    try:
+        genai.configure(api_key=api_key)
+        
+        # --- KRİTİK ADIM: Mevcut ve yetkili modelleri listele ---
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # En iyi seçenekten en alta doğru öncelik sırası
+        prefer_list = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-pro', 'models/gemini-1.0-pro']
+        
+        selected_model = None
+        for p in prefer_list:
+            if p in available_models:
+                selected_model = p
+                break
+        
+        if not selected_model:
+            selected_model = available_models[0] if available_models else 'models/gemini-pro'
+
+        model = genai.GenerativeModel(selected_model)
+        prompt = f"""Hisse: {data['name']} ({data['code']}). Fiyat: {data['price']}, Değişim: %{data['change']}. 
+        Peter Lynch tarzı analiz et. Türkçe yanıtla. SADECE JSON döndür:
+        {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
+        
+        response = model.generate_content(prompt)
+        raw_text = response.text.replace('```json', '').replace('```', '').strip()
+        d = json.loads(repair_json(raw_text))
+        
+        return AnalysisResult(
+            data['code'], data['name'], d.get('score', 50), d.get('advice', 'Gözlem'),
+            d.get('summary', ''), d.get('reason', ''), d.get('risk', ''), d.get('peg', 'N/A')
+        )
+    except Exception as e:
+        return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:50]}")
 
 # --- 4. ANA AKIŞ ---
 def main():
@@ -69,7 +76,7 @@ def main():
     session = cur_requests.Session()
     results = []
     
-    print(f"🚀 Analiz Başlıyor (Dr. Ömer Özel)...")
+    print(f"🚀 Analiz Başlıyor (Model Kaşifi Aktif)...")
     for code in stock_codes:
         data = fetch_stock_data(code, session)
         if data:
@@ -87,11 +94,11 @@ def main():
         for r in results:
             report += f"#### 🔹 {r.name} ({r.code})\n- **Strateji:** {r.reason}\n- **Analiz:** {r.summary}\n- **Risk:** {r.risk}\n\n---\n"
     else:
-        report += "⚠️ Veri çekilemedi. API anahtarınızı (GEMINI_API_KEY) kontrol edin."
+        report += "⚠️ Veri çekilemedi. API anahtarınızı kontrol edin."
 
     with open("reports/rapor.md", "w", encoding="utf-8") as f:
         f.write(report)
-    print("✅ Bitti.")
+    print("✅ Rapor Hazır.")
 
 if __name__ == "__main__":
     main()
