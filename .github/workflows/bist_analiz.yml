@@ -1,7 +1,7 @@
 name: BIST Stratejik Analiz 🇹🇷
 
 on:
-  workflow_dispatch: # Manuel çalıştırma butonu
+  workflow_dispatch:
 
 jobs:
   analyze:
@@ -15,7 +15,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      # --- KRİTİK ADIM: PDF motoru için gerekli sistem dosyalarını yükler ---
       - name: Sistem Kutuphanelerini Yukle
         run: |
           sudo apt-get update
@@ -30,14 +29,11 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PORTFOLIO_TYPE: "BIST"
-          # Sizin güncel 20 hisselik listeniz:
           STOCK_LIST: "AKSA.IS,AKSEN.IS,ALTNY.IS,ASELS.IS,ASTOR.IS,BIMAS.IS,ENJSA.IS,FROTO.IS,ISMEN.IS,KATMR.IS,KONTR.IS,MIATK.IS,ODINE.IS,ONRYT.IS,OTKAR.IS,SDTTR.IS,SISE.IS,THYAO.IS,TUPRS.IS,VBTYZ.IS"
         run: python main.py
 
-      - name: Google Drive'a PDF Yukle
-        uses: adityak74/google-drive-upload-git-action@main
+      - name: Raporu Github'a Kaydet
+        uses: actions/upload-artifact@v4
         with:
-          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
-          filename: reports/*.pdf
-          folderId: ${{ secrets.GDRIVE_FOLDER_ID }}
-          overwrite: false
+          name: BIST_Analiz_Raporu
+          path: reports/*.pdf
