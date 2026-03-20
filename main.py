@@ -34,21 +34,10 @@ def fetch_stock_data(code, session):
 def analyze_with_google(data, api_key):
     try:
         genai.configure(api_key=api_key)
-        
-        # --- KRİTİK ADIM: Mevcut ve yetkili modelleri listele ---
+        # Mevcut modelleri listele ve en iyisini seç
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        
-        # En iyi seçenekten en alta doğru öncelik sırası
-        prefer_list = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-pro', 'models/gemini-1.0-pro']
-        
-        selected_model = None
-        for p in prefer_list:
-            if p in available_models:
-                selected_model = p
-                break
-        
-        if not selected_model:
-            selected_model = available_models[0] if available_models else 'models/gemini-pro'
+        prefer_list = ['models/gemini-1.5-flash', 'models/gemini-1.5-flash-latest', 'models/gemini-pro']
+        selected_model = next((p for p in prefer_list if p in available_models), available_models[0] if available_models else 'models/gemini-pro')
 
         model = genai.GenerativeModel(selected_model)
         prompt = f"""Hisse: {data['name']} ({data['code']}). Fiyat: {data['price']}, Değişim: %{data['change']}. 
@@ -66,26 +55,39 @@ def analyze_with_google(data, api_key):
     except Exception as e:
         return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:50]}")
 
-# --- 4. ANA AKIŞ ---
+# --- 4. ANA AKIŞ (HIZ SABİTLEYİCİ EKLENDİ) ---
 def main():
     os.makedirs("reports", exist_ok=True)
     api_key = os.getenv("GEMINI_API_KEY")
-    stock_input = os.getenv("STOCK_LIST", "ASELS.IS,ASTOR.IS,THYAO.IS,TUPRS.IS,YUNSA.IS")
+    stock_input = os.getenv("STOCK_LIST", "TUPRS.IS,THYAO.IS,SISE.IS")
     stock_codes = [s.strip().upper() for s in stock_input.split(',') if s.strip()]
     
     session = cur_requests.Session()
     results = []
     
-    print(f"🚀 Analiz Başlıyor (Model Kaşifi Aktif)...")
-    for code in stock_codes:
+    print(f"🚀 Dr. Ömer için {len(stock_codes)} hisselik operasyon başlıyor...")
+    
+    for i, code in enumerate(stock_codes):
+        # --- KRİTİK: Her 5 hissede bir 20 saniye mola (API Kotası Koruması) ---
+        if i > 0 and i % 5 == 0:
+            print(f"⏳ Kota dolmaması için 20 saniye mola veriliyor ({i}/{len(stock_codes)} tamamlandı)...")
+            time.sleep(20)
+            
         data = fetch_stock_data(code, session)
         if data:
+            print(f"🧠 {code} analiz ediliyor...")
             res = analyze_with_google(data, api_key)
             if res: results.append(res)
-        time.sleep(1)
+        
+        # Her hisse arasında standart 5 saniye bekleme (Yavaş ama güvenli)
+        time.sleep(5)
 
-    now = datetime.now().strftime('%d-%m-%Y %H:%M')
-    report = f"## 📈 Dr. Ömer - Stratejik Karar Panosu ({now})\n\n"
+    # Tarih formatı YYYY_MM_DD (Kronolojik sıralama için)
+    date_str = datetime.now().strftime('%Y_%m_%d')
+    report_filename = f"reports/Analiz_{date_str}.md"
+
+    # Raporu Oluştur
+    report = f"## 📈 Dr. Ömer - Stratejik Karar Panosu ({datetime.now().strftime('%d-%m-%Y %H:%M')})\n\n"
     if results:
         report += "| Hisse | Öneri | Puan | PEG | Temel Risk |\n| :--- | :--- | :--- | :--- | :--- |\n"
         for r in results:
@@ -94,11 +96,11 @@ def main():
         for r in results:
             report += f"#### 🔹 {r.name} ({r.code})\n- **Strateji:** {r.reason}\n- **Analiz:** {r.summary}\n- **Risk:** {r.risk}\n\n---\n"
     else:
-        report += "⚠️ Veri çekilemedi. API anahtarınızı kontrol edin."
+        report += "⚠️ Veri çekilemedi. Lütfen ayarları kontrol edin."
 
-    with open("reports/rapor.md", "w", encoding="utf-8") as f:
+    with open(report_filename, "w", encoding="utf-8") as f:
         f.write(report)
-    print("✅ Rapor Hazır.")
+    print(f"✅ Analiz tamamlandı: {report_filename}")
 
 if __name__ == "__main__":
     main()
