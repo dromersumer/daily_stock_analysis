@@ -1,1 +1,34 @@
+name: BIST Stratejik Analiz 🇹🇷
 
+on:
+  workflow_dispatch: # Manuel başlatma butonu açar
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kodu Cek
+        uses: actions/checkout@v4
+      
+      - name: Python Kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Kutuphaneleri Yukle
+        run: pip install -r requirements.txt
+
+      - name: Analizi Gerceklestir
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PORTFOLIO_TYPE: "BIST"
+          STOCK_LIST: "AKSA.IS,AKSEN.IS,ALTNY.IS,ASELS.IS,ASTOR.IS,BIMAS.IS,ENJSA.IS,FROTO.IS,ISMEN.IS,KATMR.IS,KONTR.IS,MIATK.IS,ODINE.IS,ONRYT.IS,OTKAR.IS,SDTTR.IS,SISE.IS,THYAO.IS,TUPRS.IS,VBTYZ.IS"
+        run: python main.py
+
+      - name: Google Drive'a PDF Yukle
+        uses: adityak74/google-drive-upload-git-action@main
+        with:
+          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
+          filename: reports/*.pdf
+          folderId: ${{ secrets.GDRIVE_FOLDER_ID }}
+          overwrite: false
