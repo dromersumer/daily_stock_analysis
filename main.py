@@ -4,8 +4,6 @@ from datetime import datetime
 from curl_cffi import requests as cur_requests
 import google.generativeai as genai
 from json_repair import repair_json
-import markdown2
-from xhtml2pdf import pisa
 
 class AnalysisResult:
     def __init__(self, code, name, score=50, advice="Gözlem", summary="", reason="", risk="", peg="N/A"):
@@ -33,27 +31,10 @@ def fetch_stock_data(code, session):
 def analyze_with_google(data, api_key):
     try:
         genai.configure(api_key=api_key)
-        
-        # KESİN ÇÖZÜM: İsim tahmin etme, doğrudan Google'ın verdiği listeden seç.
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        selected_model = next((m for m in available_models if "1.5-flash" in m), available_models[0] if available_models else "models/gemini-1.5-flash")
         
-        selected_model = None
-        # Önce 'flash' modelini ara (en hızlısı)
-        for m in available_models:
-            if "1.5-flash" in m:
-                selected_model = m
-                break
-                
-        # Eğer flash bulamazsa, listedeki İLK çalışan modeli al
-        if not selected_model and available_models:
-            selected_model = available_models[0]
-            
-        # Hiçbir şey bulamazsa son çare
-        if not selected_model:
-            selected_model = "models/gemini-1.5-flash"
-
         model = genai.GenerativeModel(selected_model)
-        
         prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). 
         Fiyat: {data['price']}, Değişim: %{data['change']}. 
         Lynch kriterlerine göre (PEG, büyüme, borç) analiz et. Türkçe yanıtla. 
@@ -71,24 +52,7 @@ def analyze_with_google(data, api_key):
     except Exception as e:
         return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:30]}")
 
-def create_pdf(report_content, output_path):
-    html_content = f"""
-    <html><head><meta charset="UTF-8">
-    <style>
-        body {{ font-family: 'Helvetica', 'Arial', sans-serif; font-size: 10px; color: #333; }}
-        table {{ border-collapse: collapse; width: 100%; margin-top: 15px; }}
-        th, td {{ border: 1px solid #999; padding: 6px; text-align: left; }}
-        th {{ background-color: #2c3e50; color: white; }}
-        h2 {{ color: #d35400; border-bottom: 1px solid #d35400; }}
-        h4 {{ color: #2980b9; margin-top: 15px; }}
-    </style></head>
-    <body>{markdown2.markdown(report_content)}</body></html>
-    """
-    with open(output_path, "w+b") as result_file:
-        pisa.CreatePDF(html_content, dest=result_file)
-
 def main():
-    os.makedirs("reports", exist_ok=True)
     api_key = os.getenv("GEMINI_API_KEY")
     stock_input = os.getenv("STOCK_LIST", "")
     portfolio_type = os.getenv("PORTFOLIO_TYPE", "BIST")
@@ -98,20 +62,15 @@ def main():
     results = []
     
     print(f"🚀 Analiz Başlıyor...")
-    
     for i, code in enumerate(stock_codes):
         data = fetch_stock_data(code, session)
         if data:
             print(f"🧠 {code} analiz ediliyor...")
             res = analyze_with_google(data, api_key)
             results.append(res)
-        
-        # Kota aşımını engellemek için 12 saniyelik mola
-        time.sleep(12)
+        time.sleep(12) # Kota dostu bekleme
 
-    date_str = datetime.now().strftime('%Y_%m_%d')
-    base_name = f"Analiz_{portfolio_type}_{date_str}"
-    
+    # RAPOR OLUŞTURMA
     report = f"## 📈 Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n\n"
     report += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     
@@ -123,14 +82,12 @@ def main():
         report += "\n---\n### 🔍 Detaylı Peter Lynch Analizleri\n"
         for r in results:
             report += f"#### 🔹 {r.name} ({r.code})\n- **Lynch Stratejisi:** {r.reason}\n- **Analiz:** {r.summary}\n- **Kritik Risk:** {r.risk}\n\n---\n"
-    else:
-        report += "⚠️ Veri çekilemedi."
-
-    with open(f"reports/{base_name}.md", "w", encoding="utf-8") as f:
-        f.write(report)
     
-    create_pdf(report, f"reports/{base_name}.pdf")
-    print(f"✅ Rapor Hazır.")
+    # GITHUB EKRANINA YAZDIRMA (Sihirli Kısım)
+    summary_file = os.getenv("GITHUB_STEP_SUMMARY")
+    if summary_file:
+        with open(summary_file, "a", encoding="utf-8") as f:
+            f.write(report)
 
 if __name__ == "__main__":
     main()
