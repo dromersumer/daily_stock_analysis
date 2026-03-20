@@ -59,7 +59,7 @@ def send_email(report_content):
         print("E-posta şifresi bulunamadı, mail gönderilmedi.")
         return
 
-    password = password.replace(" ", "") # Aradaki boşlukları temizle
+    password = password.replace(" ", "")
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = receiver_email
@@ -93,25 +93,43 @@ def main():
             results.append(res)
         time.sleep(12)
 
-    report = f"Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n"
-    report += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
+    # 1. GITHUB İÇİN ŞIK TABLO (MARKDOWN)
+    md_report = f"## 📈 Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n\n"
+    md_report += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
+    
+    if results:
+        md_report += "| Hisse | Öneri | Puan | PEG | Temel Risk |\n| :--- | :--- | :--- | :--- | :--- |\n"
+        for r in results:
+            md_report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} | {r.risk[:25]}... |\n"
+        
+        md_report += "\n---\n### 🔍 Detaylı Peter Lynch Analizleri\n"
+        for r in results:
+            md_report += f"#### 🔹 {r.name} ({r.code})\n- **Lynch Stratejisi:** {r.reason}\n- **Analiz:** {r.summary}\n- **Kritik Risk:** {r.risk}\n\n---\n"
+    else:
+        md_report += "⚠️ Veri çekilemedi.\n"
+
+    # 2. E-POSTA İÇİN SADE METİN
+    plain_report = f"Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n"
+    plain_report += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     
     if results:
         for r in results:
-            report += f"[{r.code}] {r.name}\n"
-            report += f"Öneri: {r.advice} (Puan: {r.score}) | PEG: {r.peg}\n"
-            report += f"Lynch Stratejisi: {r.reason}\n"
-            report += f"Kritik Risk: {r.risk}\n"
-            report += "-" * 40 + "\n"
-    
-    # GitHub Ekrana Yazdır
+            plain_report += f"[{r.code}] {r.name}\n"
+            plain_report += f"Öneri: {r.advice} (Puan: {r.score}) | PEG: {r.peg}\n"
+            plain_report += f"Lynch Stratejisi: {r.reason}\n"
+            plain_report += f"Kritik Risk: {r.risk}\n"
+            plain_report += "-" * 40 + "\n"
+    else:
+        plain_report += "⚠️ Veri çekilemedi.\n"
+
+    # GitHub Ekranına Şık Tabloyu Yazdır
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
         with open(summary_file, "a", encoding="utf-8") as f:
-            f.write("```text\n" + report + "\n```")
+            f.write(md_report)
             
-    # Mail Gönder
-    send_email(report)
+    # Mail Olarak Sade Metni Gönder
+    send_email(plain_report)
 
 if __name__ == "__main__":
     main()
