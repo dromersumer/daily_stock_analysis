@@ -15,25 +15,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Sistem Kutuphanelerini Yukle
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcairo2-dev pkg-config python3-dev
-
       - name: Kutuphaneleri Yukle
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install curl_cffi google-generativeai json_repair
 
-      - name: Analizi Gerceklestir
+      - name: Analizi Gerceklestir ve Ekrana Yazdir
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PORTFOLIO_TYPE: "BIST"
-          STOCK_LIST: "AKSA.IS,AKSEN.IS,ALTNY.IS,ASELS.IS,ASTOR.IS,BIMAS.IS,ENJSA.IS,FROTO.IS,ISMEN.IS,KATMR.IS,KONTR.IS,MIATK.IS,ODINE.IS,ONRYT.IS,OTKAR.IS,SDTTR.IS,SISE.IS,THYAO.IS,TUPRS.IS,VBTYZ.IS"
+          STOCK_LIST: "AKSA.IS,THYAO.IS,TUPRS.IS" 
         run: python main.py
-
-      - name: Raporu Github'a Kaydet
-        uses: actions/upload-artifact@v4
-        with:
-          name: BIST_Analiz_Raporu
-          path: reports/*.pdf
