@@ -7,7 +7,6 @@ from json_repair import repair_json
 import markdown2
 from xhtml2pdf import pisa
 
-# --- 1. VERİ MODELİ ---
 class AnalysisResult:
     def __init__(self, code, name, score=50, advice="Gözlem", summary="", reason="", risk="", peg="N/A"):
         self.code, self.name, self.score, self.advice = code, name, score, advice
@@ -15,7 +14,6 @@ class AnalysisResult:
     def get_emoji(self):
         return {'Al': '🟢', 'Güçlü Al': '💚', 'Tut': '🟡', 'Sat': '🔴', 'Gözlem': '⚪'}.get(self.advice, '⚪')
 
-# --- 2. VERİ ÇEKME MOTORU (YAHOO BYPASS) ---
 def fetch_stock_data(code, session):
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{code}?interval=1d&range=7d"
@@ -32,11 +30,21 @@ def fetch_stock_data(code, session):
         }
     except: return None
 
-# --- 3. AKILLI AI ANALİZÖRÜ ---
 def analyze_with_google(data, api_key):
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        # SİLDİĞİM AKILLI MODEL SEÇİCİYİ GERİ GETİRDİM (404 HATASINI ÇÖZER)
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        prefer_list = ['models/gemini-1.5-flash-latest', 'models/gemini-1.5-pro-latest', 'models/gemini-pro']
+        
+        selected_model = 'gemini-pro' # Eğer hiçbirini bulamazsa en garanti modele geçer
+        for p in prefer_list:
+            if p in available_models:
+                selected_model = p
+                break
+                
+        model = genai.GenerativeModel(selected_model)
         
         prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). 
         Fiyat: {data['price']}, Değişim: %{data['change']}. 
@@ -55,7 +63,6 @@ def analyze_with_google(data, api_key):
     except Exception as e:
         return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:30]}")
 
-# --- 4. PDF DÖNÜŞTÜRÜCÜ ---
 def create_pdf(report_content, output_path):
     html_content = f"""
     <html><head><meta charset="UTF-8">
@@ -72,7 +79,6 @@ def create_pdf(report_content, output_path):
     with open(output_path, "w+b") as result_file:
         pisa.CreatePDF(html_content, dest=result_file)
 
-# --- 5. ANA AKIŞ ---
 def main():
     os.makedirs("reports", exist_ok=True)
     api_key = os.getenv("GEMINI_API_KEY")
@@ -92,7 +98,7 @@ def main():
             res = analyze_with_google(data, api_key)
             results.append(res)
         
-        # Sizin istediğiniz 12 saniyelik mola
+        # API Kotasına takılmamak için 12 saniyelik mola
         time.sleep(12)
 
     date_str = datetime.now().strftime('%Y_%m_%d')
