@@ -92,7 +92,7 @@ def main():
             results.append(res)
         time.sleep(12)
 
-    # 1. GITHUB İÇİN ŞIK VE MOBİL DOSTU TABLO (MARKDOWN)
+    # 1. GITHUB İÇİN ŞIK TABLO (MARKDOWN) - MOBİL DOSTU KESİN ÇÖZÜM
     md_report = f"## 📈 Dr. Ömer - {portfolio_type} Karar Panosu\n\n"
     md_report += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     
@@ -102,43 +102,7 @@ def main():
             md_report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} |\n"
         
         md_report += "\n---\n\n"
-        md_report += "### 🔍 Hisse Bazlı Detaylı Analizler\n\n"
+        md_report += "### 🔍 Detaylı Analiz Notları\n\n"
         for r in results:
-            # Her analizi ayrı bir blok içine alarak mobil kesilmeleri önlüyoruz
+            # Boşluklu format: Mobilde görünürlüğü garanti eder
             md_report += f"> ### 🔹 {r.name} ({r.code})\n"
-            md_report += f"> **Puan:** {r.score} | **Öneri:** {r.advice} | **PEG:** {r.peg}\n"
-            md_report += f"> \n"
-            md_report += f"> **Lynch Stratejisi:** {r.reason}\n"
-            md_report += f"> \n"
-            md_report += f"> **Analiz:** {r.summary}\n"
-            md_report += f"> \n"
-            md_report += f"> **Kritik Risk:** {r.risk}\n\n"
-            md_report += "---\n\n"
-    else:
-        md_report += "⚠️ Veri çekilemedi.\n"
-
-    # 2. E-POSTA İÇİN SADE METİN
-    plain_report = f"Dr. Ömer - {portfolio_type} Karar Panosu\n"
-    plain_report += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
-    
-    if results:
-        for r in results:
-            plain_report += f"[{r.code}] {r.name}\n"
-            plain_report += f"Öneri: {r.advice} (Puan: {r.score}) | PEG: {r.peg}\n"
-            plain_report += f"Lynch Stratejisi: {r.reason}\n"
-            plain_report += f"Kritik Risk: {r.risk}\n"
-            plain_report += "-" * 40 + "\n"
-    else:
-        plain_report += "⚠️ Veri çekilemedi.\n"
-
-    # GitHub Özet Ekranına Yazdır
-    summary_file = os.getenv("GITHUB_STEP_SUMMARY")
-    if summary_file:
-        with open(summary_file, "a", encoding="utf-8") as f:
-            f.write(md_report)
-            
-    # Mail Gönder
-    send_email(plain_report)
-
-if __name__ == "__main__":
-    main()
