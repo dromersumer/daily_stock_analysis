@@ -1,6 +1,6 @@
-python-dotenv
 curl_cffi
 google-generativeai
 json-repair
-markdown2
-xhtml2pdf
+yfinance
+pandas
+numpy
