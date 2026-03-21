@@ -65,7 +65,6 @@ def send_email(report_content):
     msg['To'] = receiver_email
     msg['Subject'] = f"📈 Günlük BIST Stratejik Analiz Raporu - {datetime.now().strftime('%d.%m.%Y')}"
 
-    # Maili düz metin formatında ekle
     msg.attach(MIMEText(report_content, 'plain', 'utf-8'))
 
     try:
@@ -93,23 +92,33 @@ def main():
             results.append(res)
         time.sleep(12)
 
-    # 1. GITHUB İÇİN ŞIK TABLO (MARKDOWN)
-    md_report = f"## 📈 Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n\n"
+    # 1. GITHUB İÇİN ŞIK VE MOBİL DOSTU TABLO (MARKDOWN)
+    md_report = f"## 📈 Dr. Ömer - {portfolio_type} Karar Panosu\n\n"
     md_report += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     
     if results:
-        md_report += "| Hisse | Öneri | Puan | PEG | Temel Risk |\n| :--- | :--- | :--- | :--- | :--- |\n"
+        md_report += "| Hisse | Öneri | Puan | PEG |\n| :--- | :--- | :--- | :--- |\n"
         for r in results:
-            md_report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} | {r.risk[:25]}... |\n"
+            md_report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} |\n"
         
-        md_report += "\n---\n### 🔍 Detaylı Peter Lynch Analizleri\n"
+        md_report += "\n---\n\n"
+        md_report += "### 🔍 Hisse Bazlı Detaylı Analizler\n\n"
         for r in results:
-            md_report += f"#### 🔹 {r.name} ({r.code})\n- **Lynch Stratejisi:** {r.reason}\n- **Analiz:** {r.summary}\n- **Kritik Risk:** {r.risk}\n\n---\n"
+            # Her analizi ayrı bir blok içine alarak mobil kesilmeleri önlüyoruz
+            md_report += f"> ### 🔹 {r.name} ({r.code})\n"
+            md_report += f"> **Puan:** {r.score} | **Öneri:** {r.advice} | **PEG:** {r.peg}\n"
+            md_report += f"> \n"
+            md_report += f"> **Lynch Stratejisi:** {r.reason}\n"
+            md_report += f"> \n"
+            md_report += f"> **Analiz:** {r.summary}\n"
+            md_report += f"> \n"
+            md_report += f"> **Kritik Risk:** {r.risk}\n\n"
+            md_report += "---\n\n"
     else:
         md_report += "⚠️ Veri çekilemedi.\n"
 
     # 2. E-POSTA İÇİN SADE METİN
-    plain_report = f"Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n"
+    plain_report = f"Dr. Ömer - {portfolio_type} Karar Panosu\n"
     plain_report += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     
     if results:
@@ -122,13 +131,13 @@ def main():
     else:
         plain_report += "⚠️ Veri çekilemedi.\n"
 
-    # GitHub Ekranına Şık Tabloyu Yazdır
+    # GitHub Özet Ekranına Yazdır
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
         with open(summary_file, "a", encoding="utf-8") as f:
             f.write(md_report)
             
-    # Mail Olarak Sade Metni Gönder
+    # Mail Gönder
     send_email(plain_report)
 
 if __name__ == "__main__":
