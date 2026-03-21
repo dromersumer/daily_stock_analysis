@@ -33,10 +33,11 @@ def fetch_stock_data(code, session):
 def analyze_with_google(data, api_key):
     try:
         genai.configure(api_key=api_key)
-        # MODEL İSMİ DÜZELTİLDİ: 'gemini-1.5-flash'
+        # SİMÜLASYON NOTU: Model ismi en temiz haliyle yazıldı.
         model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"""Hisse: {data['name']} ({data['code']}). Fiyat: {data['price']}, Değişim: %{data['change']}. 
-        Peter Lynch kriterlerine göre analiz et. Türkçe yanıtla. 
+        prompt = f"""Sen Peter Lynch tarzı borsa uzmanısın. Hisse: {data['name']} ({data['code']}). 
+        Fiyat: {data['price']}, Değişim: %{data['change']}. 
+        Lynch kriterlerine göre (PEG, büyüme, borç) analiz et. Türkçe yanıtla. 
         SADECE JSON döndür: {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
         
         response = model.generate_content(prompt)
@@ -55,7 +56,8 @@ def send_email(report_content):
     password = os.getenv("EMAIL_PASSWORD")
     if not password: return
     msg = MIMEMultipart()
-    msg['From'], msg['To'], msg['Subject'] = sender, sender, f"📈 BIST Analiz Raporu - {datetime.now().strftime('%d.%m.%Y')}"
+    msg['From'], msg['To'] = sender, sender
+    msg['Subject'] = f"📈 BIST Stratejik Karar Raporu - {datetime.now().strftime('%d.%m.%Y')}"
     msg.attach(MIMEText(report_content, 'plain', 'utf-8'))
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
@@ -77,26 +79,29 @@ def main():
             results.append(analyze_with_google(data, api_key))
             time.sleep(12)
 
-    # GITHUB ÖZETİ (TABLO + DETAY)
+    # 1. GITHUB ÖZETİ (TABLO + MOBİL DOSTU DETAY)
     md = f"## 📈 Dr. Ömer - Stratejik Karar Panosu\n\n"
     md += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     md += "| Hisse | Öneri | Puan | PEG |\n| :--- | :--- | :--- | :--- |\n"
     for r in results:
         md += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} |\n"
     
-    md += "\n---\n\n### 🔍 Detaylı Analizler\n\n"
+    md += "\n---\n\n### 🔍 Detaylı Analiz Notları\n\n"
     for r in results:
         md += f"#### 🔹 {r.name} ({r.code})\n"
         md += f"- **Durum:** {r.advice} ({r.score} Puan)\n"
-        md += f"- **Strateji:** {r.reason}\n"
-        md += f"- **Analiz:** {r.summary}\n"
-        md += f"- **Risk:** {r.risk}\n\n---\n\n"
+        md += f"- **Lynch Stratejisi:** {r.reason}\n"
+        md += f"- **Özet Analiz:** {r.summary}\n"
+        md += f"- **Kritik Risk:** {r.risk}\n"
+        md += f"- **PEG Oranı:** {r.peg}\n\n---\n\n"
     
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
         with open(summary_file, "a", encoding="utf-8") as f: f.write(md)
             
-    plain = "\n".join([f"[{r.code}] {r.name}: {r.advice} ({r.score})" for r in results])
+    # 2. E-POSTA RAPORU
+    plain = "Dr. Ömer - BIST Karar Raporu\n\n"
+    plain += "\n".join([f"[{r.code}] {r.name}: {r.advice} ({r.score} Puan) - PEG: {r.peg}" for r in results])
     send_email(plain)
 
 if __name__ == "__main__":
