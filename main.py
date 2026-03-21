@@ -33,12 +33,11 @@ def fetch_stock_data(code, session):
 def analyze_with_google(data, api_key):
     try:
         genai.configure(api_key=api_key)
-        # SABAHKİ ÇALIŞAN MODEL İSMİNE GERİ DÖNÜLDÜ
-        model = genai.GenerativeModel("models/gemini-1.5-flash")
-        prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). 
-        Fiyat: {data['price']}, Değişim: %{data['change']}. 
-        Lynch kriterlerine göre analiz et. Türkçe yanıtla. 
-        SADECE JSON döndür: {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        selected_model = next((m for m in available_models if "1.5-flash" in m), available_models[0] if available_models else "models/gemini-1.5-flash")
+        
+        model = genai.GenerativeModel(selected_model)
+        prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). Fiyat: {data['price']}, Değişim: %{data['change']}. Lynch kriterlerine göre (PEG, büyüme, borç) analiz et. Türkçe yanıtla. SADECE JSON döndür: {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
         
         response = model.generate_content(prompt)
         raw_text = response.text.replace('```json', '').replace('```', '').strip()
@@ -49,55 +48,88 @@ def analyze_with_google(data, api_key):
             d.get('summary', ''), d.get('reason', ''), d.get('risk', ''), d.get('peg', 'N/A')
         )
     except Exception as e:
-        return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:40]}")
+        return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:30]}")
 
 def send_email(report_content):
-    sender = "dromersumer@gmail.com"
+    sender_email = "dromersumer@gmail.com"
+    receiver_email = "dromersumer@gmail.com"
     password = os.getenv("EMAIL_PASSWORD")
-    if not password: return
+    
+    if not password:
+        print("E-posta şifresi bulunamadı, mail gönderilmedi.")
+        return
+
+    password = password.replace(" ", "")
     msg = MIMEMultipart()
-    msg['From'], msg['To'] = sender, sender
-    msg['Subject'] = f"📈 BIST Stratejik Analiz Raporu - {datetime.now().strftime('%d.%m.%Y')}"
+    msg['From'] = sender_email
+    msg['To'] = receiver_email
+    msg['Subject'] = f"📈 Günlük BIST Stratejik Analiz Raporu - {datetime.now().strftime('%d.%m.%Y')}"
+
+    # Maili düz metin formatında ekle
     msg.attach(MIMEText(report_content, 'plain', 'utf-8'))
+
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(sender, password.replace(" ", ""))
-            server.sendmail(sender, sender, msg.as_string())
-    except: pass
+            server.login(sender_email, password)
+            server.sendmail(sender_email, receiver_email, msg.as_string())
+        print("✅ E-posta başarıyla gönderildi!")
+    except Exception as e:
+        print(f"❌ E-posta gönderim hatası: {str(e)}")
 
 def main():
     api_key = os.getenv("GEMINI_API_KEY")
-    stock_input = os.getenv("STOCK_LIST", "THYAO.IS,AKSA.IS,TUPRS.IS")
+    stock_input = os.getenv("STOCK_LIST", "")
+    portfolio_type = os.getenv("PORTFOLIO_TYPE", "BIST")
     stock_codes = [s.strip().upper() for s in stock_input.split(',') if s.strip()]
-    session, results = cur_requests.Session(), []
+    session = cur_requests.Session()
+    results = []
     
-    for code in stock_codes:
+    print(f"🚀 Analiz Başlıyor...")
+    for i, code in enumerate(stock_codes):
         data = fetch_stock_data(code, session)
         if data:
-            results.append(analyze_with_google(data, api_key))
-            time.sleep(12)
+            print(f"🧠 {code} analiz ediliyor...")
+            res = analyze_with_google(data, api_key)
+            results.append(res)
+        time.sleep(12)
 
-    # GITHUB ÖZETİ (TABLO + SADE DETAY)
-    md = f"## 📈 Dr. Ömer - Stratejik Karar Panosu\n\n"
-    md += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
-    md += "| Hisse | Öneri | Puan | PEG |\n"
-    md += "| :--- | :--- | :--- | :--- |\n"
-    for r in results:
-        md += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} |\n"
+    # 1. GITHUB İÇİN ŞIK TABLO (MARKDOWN)
+    md_report = f"## 📈 Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n\n"
+    md_report += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     
-    md += "\n---\n\n### 🔍 Detaylı Analiz Notları\n\n"
-    for r in results:
-        md += f"#### 🔹 {r.name} ({r.code})\n"
-        md += f"- **Durum:** {r.advice} ({r.score} Puan)\n"
-        md += f"- **Analiz:** {r.summary}\n"
-        md += f"- **Risk:** {r.risk}\n\n---\n\n"
+    if results:
+        md_report += "| Hisse | Öneri | Puan | PEG | Temel Risk |\n| :--- | :--- | :--- | :--- | :--- |\n"
+        for r in results:
+            md_report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} | {r.risk[:25]}... |\n"
+        
+        md_report += "\n---\n### 🔍 Detaylı Peter Lynch Analizleri\n"
+        for r in results:
+            md_report += f"#### 🔹 {r.name} ({r.code})\n- **Lynch Stratejisi:** {r.reason}\n- **Analiz:** {r.summary}\n- **Kritik Risk:** {r.risk}\n\n---\n"
+    else:
+        md_report += "⚠️ Veri çekilemedi.\n"
+
+    # 2. E-POSTA İÇİN SADE METİN
+    plain_report = f"Dr. Ömer - {portfolio_type} Stratejik Karar Panosu\n"
+    plain_report += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     
+    if results:
+        for r in results:
+            plain_report += f"[{r.code}] {r.name}\n"
+            plain_report += f"Öneri: {r.advice} (Puan: {r.score}) | PEG: {r.peg}\n"
+            plain_report += f"Lynch Stratejisi: {r.reason}\n"
+            plain_report += f"Kritik Risk: {r.risk}\n"
+            plain_report += "-" * 40 + "\n"
+    else:
+        plain_report += "⚠️ Veri çekilemedi.\n"
+
+    # GitHub Ekranına Şık Tabloyu Yazdır
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
-        with open(summary_file, "a", encoding="utf-8") as f: f.write(md)
+        with open(summary_file, "a", encoding="utf-8") as f:
+            f.write(md_report)
             
-    plain = "\n".join([f"[{r.code}] {r.name}: {r.advice} ({r.score})" for r in results])
-    send_email(plain)
+    # Mail Olarak Sade Metni Gönder
+    send_email(plain_report)
 
 if __name__ == "__main__":
     main()
