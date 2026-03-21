@@ -33,76 +33,57 @@ def fetch_stock_data(code, session):
 def analyze_with_google(data, api_key):
     try:
         genai.configure(api_key=api_key)
-        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        selected_model = next((m for m in available_models if "1.5-flash" in m), available_models[0] if available_models else "models/gemini-1.5-flash")
-        
-        model = genai.GenerativeModel(selected_model)
-        prompt = f"""Sen Peter Lynch tarzı uzmansın. Hisse: {data['name']} ({data['code']}). Fiyat: {data['price']}, Değişim: %{data['change']}. Lynch kriterlerine göre (PEG, büyüme, borç) analiz et. Türkçe yanıtla. SADECE JSON döndür: {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
-        
+        model = genai.GenerativeModel("models/gemini-1.5-flash")
+        prompt = f"Hisse: {data['name']} ({data['code']}). Fiyat: {data['price']}, Değişim: %{data['change']}. Peter Lynch kriterlerine göre analiz et. Türkçe yanıtla. JSON döndür: {{\"score\": 80, \"advice\": \"Al/Tut/Sat\", \"summary\": \"...\", \"reason\": \"...\", \"risk\": \"...\", \"peg\": \"...\"}}"
         response = model.generate_content(prompt)
-        raw_text = response.text.replace('```json', '').replace('```', '').strip()
-        d = json.loads(repair_json(raw_text))
-        
-        return AnalysisResult(
-            data['code'], data['name'], d.get('score', 50), d.get('advice', 'Gözlem'),
-            d.get('summary', ''), d.get('reason', ''), d.get('risk', ''), d.get('peg', 'N/A')
-        )
+        d = json.loads(repair_json(response.text.replace('```json', '').replace('```', '').strip()))
+        return AnalysisResult(data['code'], data['name'], d.get('score', 50), d.get('advice', 'Gözlem'), d.get('summary', ''), d.get('reason', ''), d.get('risk', ''), d.get('peg', 'N/A'))
     except Exception as e:
         return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:30]}")
 
 def send_email(report_content):
-    sender_email = "dromersumer@gmail.com"
-    receiver_email = "dromersumer@gmail.com"
+    sender = "dromersumer@gmail.com"
     password = os.getenv("EMAIL_PASSWORD")
-    
-    if not password:
-        print("E-posta şifresi bulunamadı, mail gönderilmedi.")
-        return
-
-    password = password.replace(" ", "")
+    if not password: return
     msg = MIMEMultipart()
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
-    msg['Subject'] = f"📈 Günlük BIST Stratejik Analiz Raporu - {datetime.now().strftime('%d.%m.%Y')}"
-
+    msg['From'], msg['To'], msg['Subject'] = sender, sender, f"📈 BIST Analiz Raporu - {datetime.now().strftime('%d.%m.%Y')}"
     msg.attach(MIMEText(report_content, 'plain', 'utf-8'))
-
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(sender_email, password)
-            server.sendmail(sender_email, receiver_email, msg.as_string())
-        print("✅ E-posta başarıyla gönderildi!")
-    except Exception as e:
-        print(f"❌ E-posta gönderim hatası: {str(e)}")
+            server.login(sender, password.replace(" ", ""))
+            server.sendmail(sender, sender, msg.as_string())
+    except: pass
 
 def main():
     api_key = os.getenv("GEMINI_API_KEY")
-    stock_input = os.getenv("STOCK_LIST", "")
-    portfolio_type = os.getenv("PORTFOLIO_TYPE", "BIST")
+    stock_input = os.getenv("STOCK_LIST", "THYAO.IS,AKSA.IS,TUPRS.IS")
     stock_codes = [s.strip().upper() for s in stock_input.split(',') if s.strip()]
-    session = cur_requests.Session()
-    results = []
+    session, results = cur_requests.Session(), []
     
-    print(f"🚀 Analiz Başlıyor...")
-    for i, code in enumerate(stock_codes):
+    for code in stock_codes:
         data = fetch_stock_data(code, session)
         if data:
-            print(f"🧠 {code} analiz ediliyor...")
-            res = analyze_with_google(data, api_key)
-            results.append(res)
-        time.sleep(12)
+            results.append(analyze_with_google(data, api_key))
+            time.sleep(10)
 
-    # 1. GITHUB İÇİN ŞIK TABLO (MARKDOWN) - MOBİL DOSTU KESİN ÇÖZÜM
-    md_report = f"## 📈 Dr. Ömer - {portfolio_type} Karar Panosu\n\n"
-    md_report += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
+    # GITHUB ÖZETİ (TABLO + DETAY)
+    md = f"## 📈 Dr. Ömer - Stratejik Karar Panosu\n\n"
+    md += "| Hisse | Öneri | Puan | PEG |\n| :--- | :--- | :--- | :--- |\n"
+    for r in results:
+        md += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} |\n"
     
-    if results:
-        md_report += "| Hisse | Öneri | Puan | PEG |\n| :--- | :--- | :--- | :--- |\n"
-        for r in results:
-            md_report += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} |\n"
-        
-        md_report += "\n---\n\n"
-        md_report += "### 🔍 Detaylı Analiz Notları\n\n"
-        for r in results:
-            # Boşluklu format: Mobilde görünürlüğü garanti eder
-            md_report += f"> ### 🔹 {r.name} ({r.code})\n"
+    md += "\n---\n\n### 🔍 Detaylı Analizler\n\n"
+    for r in results:
+        md += f"> ### 🔹 {r.name}\n> **Durum:** {r.advice} ({r.score} Puan)\n>\n> **Strateji:** {r.reason}\n>\n> **Analiz:** {r.summary}\n>\n"
+    
+    # EKRANA BAS
+    summary_file = os.getenv("GITHUB_STEP_SUMMARY")
+    if summary_file:
+        with open(summary_file, "a", encoding="utf-8") as f: f.write(md)
+            
+    # MAİL AT
+    plain = "\n".join([f"[{r.code}] {r.name}: {r.advice} ({r.score})" for r in results])
+    send_email(plain)
+
+if __name__ == "__main__":
+    main()
