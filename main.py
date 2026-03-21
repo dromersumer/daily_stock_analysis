@@ -33,13 +33,22 @@ def fetch_stock_data(code, session):
 def analyze_with_google(data, api_key):
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("models/gemini-1.5-flash")
-        prompt = f"Hisse: {data['name']} ({data['code']}). Fiyat: {data['price']}, Değişim: %{data['change']}. Peter Lynch kriterlerine göre analiz et. Türkçe yanıtla. JSON döndür: {{\"score\": 80, \"advice\": \"Al/Tut/Sat\", \"summary\": \"...\", \"reason\": \"...\", \"risk\": \"...\", \"peg\": \"...\"}}"
+        # MODEL İSMİ DÜZELTİLDİ: 'gemini-1.5-flash'
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"""Hisse: {data['name']} ({data['code']}). Fiyat: {data['price']}, Değişim: %{data['change']}. 
+        Peter Lynch kriterlerine göre analiz et. Türkçe yanıtla. 
+        SADECE JSON döndür: {{"score": 80, "advice": "Al/Tut/Sat", "summary": "...", "reason": "...", "risk": "...", "peg": "..."}}"""
+        
         response = model.generate_content(prompt)
-        d = json.loads(repair_json(response.text.replace('```json', '').replace('```', '').strip()))
-        return AnalysisResult(data['code'], data['name'], d.get('score', 50), d.get('advice', 'Gözlem'), d.get('summary', ''), d.get('reason', ''), d.get('risk', ''), d.get('peg', 'N/A'))
+        raw_text = response.text.replace('```json', '').replace('```', '').strip()
+        d = json.loads(repair_json(raw_text))
+        
+        return AnalysisResult(
+            data['code'], data['name'], d.get('score', 50), d.get('advice', 'Gözlem'),
+            d.get('summary', ''), d.get('reason', ''), d.get('risk', ''), d.get('peg', 'N/A')
+        )
     except Exception as e:
-        return AnalysisResult(data['code'], data['name'], reason=f"AI Hatası: {str(e)[:30]}")
+        return AnalysisResult(data['code'], data['name'], reason=f"Hata: {str(e)[:40]}")
 
 def send_email(report_content):
     sender = "dromersumer@gmail.com"
@@ -60,28 +69,33 @@ def main():
     stock_codes = [s.strip().upper() for s in stock_input.split(',') if s.strip()]
     session, results = cur_requests.Session(), []
     
+    print(f"🚀 Analiz Başlıyor...")
     for code in stock_codes:
         data = fetch_stock_data(code, session)
         if data:
+            print(f"🧠 {code} analiz ediliyor...")
             results.append(analyze_with_google(data, api_key))
-            time.sleep(10)
+            time.sleep(12)
 
     # GITHUB ÖZETİ (TABLO + DETAY)
     md = f"## 📈 Dr. Ömer - Stratejik Karar Panosu\n\n"
+    md += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     md += "| Hisse | Öneri | Puan | PEG |\n| :--- | :--- | :--- | :--- |\n"
     for r in results:
         md += f"| **{r.name}** | {r.get_emoji()} {r.advice} | {r.score} | {r.peg} |\n"
     
     md += "\n---\n\n### 🔍 Detaylı Analizler\n\n"
     for r in results:
-        md += f"> ### 🔹 {r.name}\n> **Durum:** {r.advice} ({r.score} Puan)\n>\n> **Strateji:** {r.reason}\n>\n> **Analiz:** {r.summary}\n>\n"
+        md += f"#### 🔹 {r.name} ({r.code})\n"
+        md += f"- **Durum:** {r.advice} ({r.score} Puan)\n"
+        md += f"- **Strateji:** {r.reason}\n"
+        md += f"- **Analiz:** {r.summary}\n"
+        md += f"- **Risk:** {r.risk}\n\n---\n\n"
     
-    # EKRANA BAS
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
         with open(summary_file, "a", encoding="utf-8") as f: f.write(md)
             
-    # MAİL AT
     plain = "\n".join([f"[{r.code}] {r.name}: {r.advice} ({r.score})" for r in results])
     send_email(plain)
 
