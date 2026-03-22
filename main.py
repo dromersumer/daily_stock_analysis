@@ -67,7 +67,7 @@ def get_technical_and_regime(df):
     return df, {"price": safe_round(last['Close']), "atr": safe_round(last['atr']), "volatility": safe_round(vol), "regime": regime}
 
 # ================================
-# FUNDAMENTAL ENGINE (PETER LYNCH DISCIPLINE)
+# FUNDAMENTAL ENGINE
 # ================================
 def get_fundamental(ticker_obj, code, current_inflation):
     clean_code = code.replace(".IS", "")
@@ -100,7 +100,6 @@ def ai_trade_desk_commentary(code, order, tech, fund, api_key):
                   f"Teknik Rejim: {tech.get('regime', 'Nötr')}, Reel Büyüme: %{fund.get('real_growth', 0)}. "
                   f"Bu kararı profesyonel bir dille tek cümleyle onayla.")
         
-        # Kararlı ve yeni model kullanımı
         response = client.models.generate_content(
             model="gemini-2.0-flash", 
             contents=prompt
@@ -144,7 +143,6 @@ def main():
         print("Uygun hisse bulunamadı.")
         return
 
-    # Ağırlıklandırma (Risk Paritesi)
     inv_vols = {c: 1/max(technicals[c]['volatility'], 0.01) for c in selected_codes}
     total_inv = sum(inv_vols.values())
     weights = {c: iv / total_inv for c, iv in inv_vols.items()}
@@ -158,7 +156,6 @@ def main():
             "lot": lot, "stop": max(0, safe_round(price - (technicals[code]['atr'] * 2.5)))
         })
 
-    # Delta Emir Üretimi
     orders = []
     for item in target_portfolio:
         curr_lot = CURRENT_PORTFOLIO.get(item['code'], 0)
@@ -169,7 +166,6 @@ def main():
         if code != "CASH" and not any(i['code'] == code for i in target_portfolio):
             orders.append({"type": "SELL", "code": code, "lot": lot})
 
-    # Rapor Oluşturma
     md = f"## 🏦 Dr. Ömer - Apex Terminal v21.0\n**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     md += "### ⚡ İŞLEM EMİRLERİ\n| İşlem | Hisse | Adet | AI Trader Onayı |\n| :--- | :--- | :--- | :--- |\n"
     for o in orders:
