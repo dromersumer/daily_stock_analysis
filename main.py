@@ -166,19 +166,10 @@ def main():
         if code != "CASH" and not any(i['code'] == code for i in target_portfolio):
             orders.append({"type": "SELL", "code": code, "lot": lot})
 
-    md = f"## 🏦 Dr. Ömer - Apex Terminal v21.0\n**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
+    md = f"## 🏦 Dr. Ömer - Apex Terminal v21.1\n**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
     md += "### ⚡ İŞLEM EMİRLERİ\n| İşlem | Hisse | Adet | AI Trader Onayı |\n| :--- | :--- | :--- | :--- |\n"
     for o in orders:
         ai_msg = ai_trade_desk_commentary(o['code'], o, technicals.get(o['code'], {}), fundamentals.get(o['code'], {}), api_key)
         md += f"| {'🟩 AL' if o['type']=='BUY' else '🟥 SAT'} | **{o['code']}** | {o['lot']} | {ai_msg} |\n"
-    
-    md += "\n---\n### 🎯 HEDEF PORTFÖY\n| Hisse | Ağırlık | Lot | İzleyen Stop |\n| :--- | :--- | :--- | :--- |\n"
-    for r in target_portfolio:
-        md += f"| **{r['code']}** | %{r['weight']*100:.1f} | {r['lot']} | {r['stop']} ₺ |\n"
-
-    summary_file = os.getenv("GITHUB_STEP_SUMMARY")
-    if summary_file:
-        with open(summary_file, "a", encoding="utf-8") as f: f.write(md)
-
-if __name__ == "__main__":
-    main()
+        
+        # 🟢 İŞTE ÇÖ
