@@ -1,6 +1,6 @@
-curl_cffi
-google-generativeai
-json-repair
 yfinance
 pandas
 numpy
+requests
+google-generativeai
+json-repair
