@@ -1,16 +1,22 @@
 # -*- coding: utf-8 -*-
-import os, math, time, random
+import os, sys, json, math, time
 from datetime import datetime
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
 
+# ================================
+# SAFE IMPORT Koruması
+# ================================
 try:
     from google import genai
 except ImportError:
     genai = None
 
+# ================================
+# CONFIG & STATE
+# ================================
 START_CAPITAL = 100000     
 MAX_PORTFOLIO_SIZE = 5     
 LOOKBACK_DAYS = 252        
@@ -20,7 +26,7 @@ CURRENT_PORTFOLIO = {
 }
 
 # ================================
-# HELPERS
+# SAFE HELPERS
 # ================================
 def safe_float(x, default=0.0):
     try: return float(x)
@@ -31,22 +37,26 @@ def safe_round(x, n=2):
     except: return 0
 
 # ================================
-# MACRO
+# MACRO ENGINE
 # ================================
 def get_tcmb_inflation():
     try:
         api_key = os.getenv("EVDS_API_KEY")
         if not api_key: return 0.50
+
         url = f"https://evds2.tcmb.gov.tr/service/evds/series=TP.TUFE1&last=13&type=json&key={api_key}"
-        data = requests.get(url, timeout=10).json()
+        res = requests.get(url, timeout=10)
+        data = res.json()
+
         items = data.get('items') or data.get('data') or []
         values = [safe_float(x.get('TP_TUFE1')) for x in items if x.get('TP_TUFE1')]
+
         return safe_round((values[-1] / values[0]) - 1, 4) if len(values) >= 12 else 0.50
     except:
         return 0.50
 
 # ================================
-# TECHNICAL
+# TECHNICAL ENGINE
 # ================================
 def get_technical_and_regime(df):
     close = df['Close']
@@ -63,6 +73,7 @@ def get_technical_and_regime(df):
 
     short_mom = close.pct_change(20).iloc[-1] if len(close) > 20 else 0
     last = df.iloc[-1]
+
     vol = safe_float(last['volatility'])
 
     if last['Close'] > last['ema200'] and short_mom > 0 and vol < 0.35:
@@ -80,165 +91,192 @@ def get_technical_and_regime(df):
     }
 
 # ================================
-# FUNDAMENTAL
+# FUNDAMENTAL ENGINE (PETER LYNCH)
 # ================================
-def get_fundamental(ticker_obj, code, inflation):
+def get_fundamental(ticker_obj, code, current_inflation):
+    clean_code = code.replace(".IS", "")
+    fund_data = {"real_growth": 0, "leverage": 0, "source": "NONE"}
+
     try:
-        clean = code.replace(".IS", "")
-        url = f"https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/MaliTablo?companyCode={clean}&exchange=TRY&financialGroup=XI_29&year1={datetime.now().year-1}&period1=12&year2={datetime.now().year-2}&period2=12"
-        raw = requests.get(url, timeout=5).json().get('value') or []
-        rev_curr = safe_float(next((i.get('value1') for i in raw if 'SATIŞ' in i.get('itemDescTR','')), 0))
-        rev_prev = safe_float(next((i.get('value2') for i in raw if 'SATIŞ' in i.get('itemDescTR','')), 0))
-        g = (rev_curr / rev_prev - 1) * 100 if rev_prev > 0 else 0
-        real = ((1 + g/100) / (1 + inflation) - 1) * 100
-        return {"real_growth": safe_round(real)}
+        res = requests.get(
+            f"https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/Data.aspx/MaliTablo?companyCode={clean_code}&exchange=TRY&financialGroup=XI_29&year1={datetime.now().year-1}&period1=12&year2={datetime.now().year-2}&period2=12",
+            headers={'User-Agent': 'Mozilla/5.0'},
+            timeout=5
+        )
+
+        data = res.json()
+        raw = data.get('value') or data.get('data') or []
+
+        rev_curr = safe_float(next((i.get('value1') for i in raw if 'SATIŞ GELİRLERİ' in i.get('itemDescTR', '')), 0))
+        rev_prev = safe_float(next((i.get('value2') for i in raw if 'SATIŞ GELİRLERİ' in i.get('itemDescTR', '')), 0))
+
+        nom_growth = (rev_curr / rev_prev - 1) * 100 if rev_prev > 0 else 0
+
+        fund_data["real_growth"] = safe_round(((1 + nom_growth/100) / (1 + current_inflation)) - 1) * 100
+        fund_data["source"] = "ISYATIRIM"
+
     except:
-        return {"real_growth": 0}
+        # 🟢 Senin Yazdığın Hızlı Veri Çekimi Koruması
+        info = getattr(ticker_obj, "fast_info", {}) or {}
+        nom_growth = (info.get("revenueGrowth", 0) or 0) * 100
+
+        fund_data["real_growth"] = safe_round(((1 + nom_growth/100) / (1 + current_inflation)) - 1) * 100
+        fund_data["source"] = "YFINANCE"
+
+    return fund_data
 
 # ================================
-# AI ENGINE (HARDENED)
+# AI ENGINE (ENTERPRISE RETRY LOGIC)
 # ================================
-def ai_call_with_retry(func, max_retries=2):
-    delay = 10
+def ai_call_with_retry(func, code, max_retries=3):
+    delay = 2
 
     for i in range(max_retries):
         try:
-            result = func()
-
-            if not result or len(result.strip()) < 5:
-                raise RuntimeError("Empty AI response")
-
-            return result
-
+            return func()
         except Exception as e:
-            msg = str(e)
-
-            is_rate = (
-                "429" in msg or
-                "RESOURCE_EXHAUSTED" in msg.upper()
-            )
-
-            print(f"⚠️ AI ERROR: {msg}")
-
-            if is_rate or "Empty AI response" in msg:
-                sleep_time = delay + random.uniform(0, 5)
-                print(f"⏳ Retry {i+1}: {sleep_time:.1f}s bekleniyor...")
-                time.sleep(sleep_time)
+            error_msg = str(e)
+            # 🔴 Rate Limit Hatası İse Bekle ve Geri Dön
+            if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
+                print(f"⏳ Rate Limit ({code}). {delay}sn bekleniyor... (Deneme {i+1}/{max_retries})")
+                time.sleep(delay)
                 delay *= 2
             else:
-                return None
+                # 🔴 Başka Bir Hataysa Bekleme, Logla ve Çık
+                print(f"🩺 DEBUG AI Error for {code}: {error_msg}")
+                return "Sistem Onaylı (AI Çevrimdışı)"
 
-    return None
+    return "Sistem Onaylı (AI Limit Aşıldı)"
 
-def get_batch_ai_commentary(client, orders, technicals, fundamentals):
-    if not client or not orders:
-        return {}
-
-    # 🟢 JITTER DELAY (GITHUB FIX)
-    time.sleep(3 + random.uniform(0, 3))
-
-    prompt = [
-        "SADECE şu formatta cevap ver:",
-        "HISSE: yorum",
-        "Başka hiçbir şey yazma."
-    ]
-
-    for o in orders:
-        c = o['code']
-        t = technicals.get(c, {})
-        f = fundamentals.get(c, {})
-        prompt.append(f"{c} | {o['type']} | {t.get('regime')} | %{f.get('real_growth')}")
-
-    full_prompt = "\n".join(prompt)
+def ai_trade_desk_commentary(code, order, tech, fund, api_key):
+    if not api_key or genai is None:
+        return "AI Devre Dışı"
 
     def _call():
-        response = client.models.generate_content(
-            model="gemini-1.5-flash",  # 🔥 daha stabil model
-            contents=full_prompt
+        client = genai.Client(api_key=api_key)
+
+        prompt = (
+            f"Uzman Trader olarak {code} için {order['type']} emrini yorumla. "
+            f"Teknik Rejim: {tech.get('regime', 'Nötr')}, Reel Büyüme: %{fund.get('real_growth', 0)}. "
+            f"Bu kararı profesyonel bir dille tek cümleyle onayla."
         )
 
-        if not response or not getattr(response, "text", None):
-            raise RuntimeError("Empty AI response")
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
+        )
 
-        return response.text.strip()
+        return (response.text or "").strip()
 
-    raw = ai_call_with_retry(_call)
-
-    print(f"\n📩 RAW AI RESPONSE:\n{raw}\n")
-
-    results = {}
-    valid_codes = [o['code'] for o in orders]
-
-    if raw:
-        for line in raw.split("\n"):
-            if ":" in line:
-                k, v = line.split(":", 1)
-                k = k.strip().upper()
-                if k in valid_codes:
-                    results[k] = v.strip()
-
-    # 🟢 GUARANTEED OUTPUT
-    for c in valid_codes:
-        if c not in results:
-            results[c] = "AI Yanıt Yok"
-
-    return results
+    return ai_call_with_retry(_call, code)
 
 # ================================
-# MAIN
+# MAIN ENGINE
 # ================================
 def main():
     api_key = os.getenv("GEMINI_API_KEY")
+    stock_input = os.getenv("STOCK_LIST", "THYAO.IS,AKSA.IS,TUPRS.IS,ASELS.IS,SISE.IS,BIMAS.IS")
+    capital_input = float(os.getenv("PORTFOLIO_CAPITAL", START_CAPITAL))
 
-    ai_client = None
-    if genai and api_key:
-        ai_client = genai.Client(api_key=api_key)
+    stock_codes = [s.strip().upper() for s in stock_input.split(',') if s.strip()]
 
-    stocks = os.getenv(
-        "STOCK_LIST",
-        "THYAO.IS,AKSA.IS,TUPRS.IS,ASELS.IS,SISE.IS,BIMAS.IS"
-    ).split(",")
+    current_inflation = get_tcmb_inflation()
+    all_data, scores, fundamentals, technicals = {}, {}, {}, {}
 
-    inflation = get_tcmb_inflation()
+    for code in stock_codes:
+        ticker = yf.Ticker(code)
+        df = ticker.history(period="2y")
 
-    techs, funds, scores = {}, {}, {}
-
-    for c in stocks:
-        df = yf.Ticker(c).history(period="2y")
-
-        if len(df) > 200:
+        if not df.empty and len(df) > 200:
             df, tech = get_technical_and_regime(df)
-            fund = get_fundamental(None, c, inflation)
+            fund = get_fundamental(ticker, code, current_inflation)
 
-            score = (tech['regime'] != "RANGE_OR_DOWN") * 50 + (fund['real_growth'] > 0) * 50
+            score = 0
+            if tech['regime'] != "RANGE_OR_DOWN": score += 50
+            if fund['real_growth'] > 0: score += 50
+
+            technicals[code] = tech
+            fundamentals[code] = fund
 
             if score > 30:
-                techs[c] = tech
-                funds[c] = fund
-                scores[c] = score
+                all_data[code] = df
+                scores[code] = score
 
-    selected = sorted(scores, key=scores.get, reverse=True)[:MAX_PORTFOLIO_SIZE]
+            time.sleep(1)
 
-    inv = {c: 1/max(techs[c]['volatility'],0.01) for c in selected}
-    total = sum(inv.values())
-    weights = {c:(v/total) for c,v in inv.items()} if total>0 else {c:1/len(inv) for c in inv}
+    selected_codes = sorted(scores, key=scores.get, reverse=True)[:MAX_PORTFOLIO_SIZE]
 
-    portfolio = []
-    for c in selected:
-        p = techs[c]['price']
-        lot = math.floor((START_CAPITAL * weights[c]) / p)
-        portfolio.append({"code":c,"lot":lot})
+    if not selected_codes:
+        print("Uygun hisse bulunamadı.")
+        return
 
-    orders = [{"type":"BUY","code":p['code'],"lot":p['lot']} for p in portfolio]
+    inv_vols = {c: 1/max(technicals[c]['volatility'], 0.01) for c in selected_codes}
+    total_inv = sum(inv_vols.values())
 
-    print("🚀 BATCH AI CALL START")
+    # 🟢 Senin Yazdığın Sıfıra Bölünme Koruması
+    weights = {c: (iv / total_inv) for c, iv in inv_vols.items()} if total_inv > 0 else {c: 1/len(inv_vols) for c in inv_vols}
 
-    ai = get_batch_ai_commentary(ai_client, orders, techs, funds)
+    target_portfolio = []
 
-    print("\n📊 FINAL OUTPUT\n")
+    for code in selected_codes:
+        price = technicals[code]['price']
+
+        lot = math.floor((capital_input * weights[code]) / price) if price > 0 else 0
+
+        target_portfolio.append({
+            "code": code,
+            "price": price,
+            "weight": weights[code],
+            "lot": lot,
+            "stop": max(0, safe_round(price - (technicals[code]['atr'] * 2.5)))
+        })
+
+    orders = []
+
+    for item in target_portfolio:
+        curr_lot = CURRENT_PORTFOLIO.get(item['code'], 0)
+
+        if item['lot'] > curr_lot:
+            orders.append({
+                "type": "BUY",
+                "code": item['code'],
+                "lot": item['lot'] - curr_lot
+            })
+
+    for code, lot in CURRENT_PORTFOLIO.items():
+        if code != "CASH" and not any(i['code'] == code for i in target_portfolio):
+            orders.append({"type": "SELL", "code": code, "lot": lot})
+
+    md = f"## 🏦 Dr. Ömer - Apex Terminal v23.0 (Ultimate Edition)\n"
+    md += f"**Tarih:** {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
+
+    md += "### ⚡ İŞLEM EMİRLERİ\n"
+    md += "| İşlem | Hisse | Adet | AI Trader Onayı |\n"
+    md += "| :--- | :--- | :--- | :--- |\n"
 
     for o in orders:
-        print(o['code'], "→", ai[o['code']])
+        ai_msg = ai_trade_desk_commentary(
+            o['code'],
+            o,
+            technicals.get(o['code'], {}),
+            fundamentals.get(o['code'], {}),
+            api_key
+        )
+
+        md += f"| {'🟩 AL' if o['type']=='BUY' else '🟥 SAT'} | **{o['code']}** | {o['lot']} | {ai_msg} |\n"
+
+    md += "\n---\n### 🎯 HEDEF PORTFÖY\n"
+    md += "| Hisse | Ağırlık | Lot | İzleyen Stop |\n"
+    md += "| :--- | :--- | :--- | :--- |\n"
+
+    for r in target_portfolio:
+        md += f"| **{r['code']}** | %{r['weight']*100:.1f} | {r['lot']} | {r['stop']} ₺ |\n"
+
+    summary_file = os.getenv("GITHUB_STEP_SUMMARY")
+
+    if summary_file:
+        with open(summary_file, "a", encoding="utf-8") as f:
+            f.write(md)
 
 if __name__ == "__main__":
     main()
