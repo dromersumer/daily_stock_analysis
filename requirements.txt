@@ -1,6 +1,6 @@
+google-genai
 yfinance
 pandas
 numpy
 requests
-google-generativeai
 json-repair
