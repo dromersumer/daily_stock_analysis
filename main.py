@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, math, time
+import os, math, time, random
 from datetime import datetime
 import yfinance as yf
 import pandas as pd
@@ -63,7 +63,6 @@ def get_technical_and_regime(df):
 
     short_mom = close.pct_change(20).iloc[-1] if len(close) > 20 else 0
     last = df.iloc[-1]
-
     vol = safe_float(last['volatility'])
 
     if last['Close'] > last['ema200'] and short_mom > 0 and vol < 0.35:
@@ -97,16 +96,15 @@ def get_fundamental(ticker_obj, code, inflation):
         return {"real_growth": 0}
 
 # ================================
-# AI ENGINE (FIXED)
+# AI ENGINE (HARDENED)
 # ================================
-def ai_call_with_retry(func, max_retries=3):
-    delay = 15
+def ai_call_with_retry(func, max_retries=2):
+    delay = 10
 
     for i in range(max_retries):
         try:
             result = func()
 
-            # 🚨 EMPTY RESPONSE FIX
             if not result or len(result.strip()) < 5:
                 raise RuntimeError("Empty AI response")
 
@@ -120,12 +118,14 @@ def ai_call_with_retry(func, max_retries=3):
                 "RESOURCE_EXHAUSTED" in msg.upper()
             )
 
+            print(f"⚠️ AI ERROR: {msg}")
+
             if is_rate or "Empty AI response" in msg:
-                print(f"⏳ Retry {i+1}: {msg} → {delay}s bekleniyor")
-                time.sleep(delay)
+                sleep_time = delay + random.uniform(0, 5)
+                print(f"⏳ Retry {i+1}: {sleep_time:.1f}s bekleniyor...")
+                time.sleep(sleep_time)
                 delay *= 2
             else:
-                print(f"❌ AI ERROR: {msg}")
                 return None
 
     return None
@@ -133,6 +133,9 @@ def ai_call_with_retry(func, max_retries=3):
 def get_batch_ai_commentary(client, orders, technicals, fundamentals):
     if not client or not orders:
         return {}
+
+    # 🟢 JITTER DELAY (GITHUB FIX)
+    time.sleep(3 + random.uniform(0, 3))
 
     prompt = [
         "SADECE şu formatta cevap ver:",
@@ -150,7 +153,7 @@ def get_batch_ai_commentary(client, orders, technicals, fundamentals):
 
     def _call():
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-1.5-flash",  # 🔥 daha stabil model
             contents=full_prompt
         )
 
@@ -174,7 +177,7 @@ def get_batch_ai_commentary(client, orders, technicals, fundamentals):
                 if k in valid_codes:
                     results[k] = v.strip()
 
-    # 🟢 MISSING FILL
+    # 🟢 GUARANTEED OUTPUT
     for c in valid_codes:
         if c not in results:
             results[c] = "AI Yanıt Yok"
@@ -191,7 +194,10 @@ def main():
     if genai and api_key:
         ai_client = genai.Client(api_key=api_key)
 
-    stocks = os.getenv("STOCK_LIST", "THYAO.IS,AKSA.IS,TUPRS.IS,ASELS.IS,SISE.IS,BIMAS.IS").split(",")
+    stocks = os.getenv(
+        "STOCK_LIST",
+        "THYAO.IS,AKSA.IS,TUPRS.IS,ASELS.IS,SISE.IS,BIMAS.IS"
+    ).split(",")
 
     inflation = get_tcmb_inflation()
 
@@ -225,8 +231,11 @@ def main():
 
     orders = [{"type":"BUY","code":p['code'],"lot":p['lot']} for p in portfolio]
 
-    print("🚀 BATCH AI CALL")
+    print("🚀 BATCH AI CALL START")
+
     ai = get_batch_ai_commentary(ai_client, orders, techs, funds)
+
+    print("\n📊 FINAL OUTPUT\n")
 
     for o in orders:
         print(o['code'], "→", ai[o['code']])
