@@ -186,7 +186,15 @@ def main():
         inv[s] = 1 / max(v, MIN_VOL)
 
     total_inv = sum(inv.values())
-    weights = {s: inv[s] / total_inv for s in selected} if total_inv > 0 else {s: 1/len(selected) for s in selected}
+
+    # ✅ EKLENEN FIX KORUNDU
+    if total_inv > 0:
+        weights = {s: inv[s] / total_inv for s in selected}
+    else:
+        if len(selected) == 0:
+            print("KRİTİK HATA: selected boş")
+            return
+        weights = {s: 1/len(selected) for s in selected}
 
     for _ in range(10):
         overweight = {s: w for s, w in weights.items() if w > MAX_WEIGHT_PER_STOCK}
@@ -255,12 +263,20 @@ def main():
     md = f"## 🏦 Apex Terminal v24.6 (20 Stocks)\n"
     md += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
 
+    md += "### ⚡ İŞLEM EMİRLERİ\n"
     md += "| İşlem | Hisse | Adet | AI |\n"
     md += "| :--- | :--- | :--- | :--- |\n"
 
     for o in orders:
         islem = "🟩 AL" if o['type'] == "BUY" else "🟥 SAT"
-        md += f"| {islem} | {o['code']} | {o['lot']} | {ai_comments.get(o['code'], 'Sistem Onaylı')} |\n"
+        md += f"| {islem} | **{o['code']}** | {o['lot']} | {ai_comments.get(o['code'], 'Sistem Onaylı')} |\n"
+
+    md += "\n---\n### 🎯 HEDEF PORTFÖY\n"
+    md += "| Hisse | Ağırlık | Lot | İzleyen Stop |\n"
+    md += "| :--- | :--- | :--- | :--- |\n"
+
+    for t in target:
+        md += f"| **{t['code']}** | %{t['weight']*100:.1f} | {t['lot']} | {t['stop']} ₺ |\n"
 
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
