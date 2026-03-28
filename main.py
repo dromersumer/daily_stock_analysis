@@ -21,8 +21,28 @@ START_CAPITAL = 100000
 MAX_PORTFOLIO_SIZE = 5     
 LOOKBACK_DAYS = 252        
 
+# GÜNCEL PORTFÖY DAĞILIMI
 CURRENT_PORTFOLIO = {
-    "THYAO.IS": 50, "TUPRS.IS": 20, "CASH": 25000    
+    "ASELS.IS": 71,
+    "ASTOR.IS": 26,
+    "BIMAS.IS": 5,
+    "KATMR.IS": 1000,
+    "AKSEN.IS": 20,
+    "OTKAR.IS": 3,
+    "FROTO.IS": 10,
+    "SISE.IS": 23,
+    "ODINE.IS": 1,
+    "MIATK.IS": 21,
+    "TUPRS.IS": 3,
+    "ALTNY.IS": 42.5,
+    "THYAO.IS": 2,
+    "KCHOL.IS": 3,
+    "ISMEN.IS": 12,
+    "RALYH.IS": 2.28,
+    "SOKM.IS": 10,
+    "KONTR.IS": 55,
+    "MAVI.IS": 10,
+    "CASH": 25000  # Sistemdeki serbest nakit miktarın
 }
 
 # ================================
@@ -116,7 +136,6 @@ def get_fundamental(ticker_obj, code, current_inflation):
         fund_data["source"] = "ISYATIRIM"
 
     except:
-        # 🟢 Senin Yazdığın Hızlı Veri Çekimi Koruması
         info = getattr(ticker_obj, "fast_info", {}) or {}
         nom_growth = (info.get("revenueGrowth", 0) or 0) * 100
 
@@ -126,7 +145,7 @@ def get_fundamental(ticker_obj, code, current_inflation):
     return fund_data
 
 # ================================
-# AI ENGINE (ENTERPRISE RETRY LOGIC)
+# AI ENGINE (TOPLU / BATCH LOGIC)
 # ================================
 def ai_call_with_retry(func, code, max_retries=3):
     delay = 2
@@ -136,39 +155,56 @@ def ai_call_with_retry(func, code, max_retries=3):
             return func()
         except Exception as e:
             error_msg = str(e)
-            # 🔴 Rate Limit Hatası İse Bekle ve Geri Dön
             if "429" in error_msg or "RESOURCE_EXHAUSTED" in error_msg:
                 print(f"⏳ Rate Limit ({code}). {delay}sn bekleniyor... (Deneme {i+1}/{max_retries})")
                 time.sleep(delay)
                 delay *= 2
             else:
-                # 🔴 Başka Bir Hataysa Bekleme, Logla ve Çık
                 print(f"🩺 DEBUG AI Error for {code}: {error_msg}")
                 return "Sistem Onaylı (AI Çevrimdışı)"
 
     return "Sistem Onaylı (AI Limit Aşıldı)"
 
-def ai_trade_desk_commentary(code, order, tech, fund, api_key):
-    if not api_key or genai is None:
-        return "AI Devre Dışı"
+def batch_ai_trade_desk_commentary(orders, technicals, fundamentals, api_key):
+    """Tüm emirleri tek bir AI isteğinde toplayarak Rate Limit aşımını engeller."""
+    if not api_key or genai is None or not orders:
+        return {o['code']: "AI Devre Dışı" for o in orders}
 
     def _call():
         client = genai.Client(api_key=api_key)
 
         prompt = (
-            f"Uzman Trader olarak {code} için {order['type']} emrini yorumla. "
-            f"Teknik Rejim: {tech.get('regime', 'Nötr')}, Reel Büyüme: %{fund.get('real_growth', 0)}. "
-            f"Bu kararı profesyonel bir dille tek cümleyle onayla."
+            "Sen bir uzman tradersın. Aşağıdaki hisse emirlerini incele ve HER BİRİ için "
+            "profesyonel, tek cümlelik kısa bir onay/yorum yaz.\n\n"
+            "SADECE GEÇERLİ BİR JSON FORMATINDA YANIT VER. Başka açıklama yazma.\n"
+            "Örnek: {\"AKSA.IS\": \"Güçlü trend ve büyüme verisiyle alım uygun.\", \"THYAO.IS\": \"Satış mantıklı.\"}\n\n"
+            "Emirler:\n"
         )
+
+        for o in orders:
+            code = o['code']
+            tech = technicals.get(code, {})
+            fund = fundamentals.get(code, {})
+            prompt += f"- {code}: {o['type']} Emri. Teknik Rejim: {tech.get('regime', 'Nötr')}, Reel Büyüme: %{fund.get('real_growth', 0)}.\n"
 
         response = client.models.generate_content(
             model="gemini-2.0-flash",
             contents=prompt
         )
 
-        return (response.text or "").strip()
+        try:
+            raw_text = response.text.replace('```json', '').replace('```', '').strip()
+            return json.loads(raw_text)
+        except Exception as e:
+            print(f"🩺 DEBUG JSON Parse Error: {e}")
+            return {o['code']: "Sistem Onaylı (AI Format Hatası)" for o in orders}
 
-    return ai_call_with_retry(_call, code)
+    result = ai_call_with_retry(_call, "TOPLU_AI_ISTEGI")
+    
+    if isinstance(result, str):
+        return {o['code']: result for o in orders}
+        
+    return result
 
 # ================================
 # MAIN ENGINE
@@ -213,7 +249,6 @@ def main():
     inv_vols = {c: 1/max(technicals[c]['volatility'], 0.01) for c in selected_codes}
     total_inv = sum(inv_vols.values())
 
-    # 🟢 Senin Yazdığın Sıfıra Bölünme Koruması
     weights = {c: (iv / total_inv) for c, iv in inv_vols.items()} if total_inv > 0 else {c: 1/len(inv_vols) for c in inv_vols}
 
     target_portfolio = []
@@ -254,15 +289,10 @@ def main():
     md += "| İşlem | Hisse | Adet | AI Trader Onayı |\n"
     md += "| :--- | :--- | :--- | :--- |\n"
 
-    for o in orders:
-        ai_msg = ai_trade_desk_commentary(
-            o['code'],
-            o,
-            technicals.get(o['code'], {}),
-            fundamentals.get(o['code'], {}),
-            api_key
-        )
+    ai_comments = batch_ai_trade_desk_commentary(orders, technicals, fundamentals, api_key)
 
+    for o in orders:
+        ai_msg = ai_comments.get(o['code'], "Sistem Onaylı (Yorum Yok)")
         md += f"| {'🟩 AL' if o['type']=='BUY' else '🟥 SAT'} | **{o['code']}** | {o['lot']} | {ai_msg} |\n"
 
     md += "\n---\n### 🎯 HEDEF PORTFÖY\n"
