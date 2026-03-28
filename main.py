@@ -187,7 +187,6 @@ def main():
 
     total_inv = sum(inv.values())
 
-    # ✅ EKLENEN FIX KORUNDU
     if total_inv > 0:
         weights = {s: inv[s] / total_inv for s in selected}
     else:
@@ -247,6 +246,9 @@ def main():
             "stop": safe_round(price - techs[s]['atr'] * 2.5)
         })
 
+    # ✅ HEDEF PORTFÖYÜ AĞIRLIĞA GÖRE (BÜYÜKTEN KÜÇÜĞE) SIRALAMA
+    target = sorted(target, key=lambda x: x['weight'], reverse=True)
+
     orders = []
 
     for t in target:
@@ -260,7 +262,7 @@ def main():
 
     ai_comments = get_ai_comments(orders)
 
-    md = f"## 🏦 Apex Terminal v24.6 (20 Stocks)\n"
+    md = f"## 🏦 Apex Terminal v24.7 (Quant Engine)\n"
     md += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
 
     md += "### ⚡ İŞLEM EMİRLERİ\n"
