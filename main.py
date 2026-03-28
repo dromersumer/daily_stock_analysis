@@ -4,10 +4,10 @@ from datetime import datetime
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import requests
 
 START_CAPITAL = 100000
-MAX_PORTFOLIO_SIZE = 5
+MAX_PORTFOLIO_SIZE = 20
+MAX_WEIGHT_PER_STOCK = 0.35
 LOOKBACK_DAYS = 252
 USE_AI = os.getenv("USE_AI", "false").lower() == "true"
 
@@ -16,95 +16,94 @@ CURRENT_PORTFOLIO = {
     "AKSEN.IS": 20, "OTKAR.IS": 3, "FROTO.IS": 10, "SISE.IS": 23,
     "ODINE.IS": 1, "MIATK.IS": 21, "TUPRS.IS": 3, "ALTNY.IS": 42.5,
     "THYAO.IS": 2, "KCHOL.IS": 3, "ISMEN.IS": 12, "RALYH.IS": 2.28,
-    "SOKM.IS": 10, "KONTR.IS": 55, "MAVI.IS": 10, "CASH": 25000
+    "SOKM.IS": 10, "KONTR.IS": 55, "MAVI.IS": 10, "PASEU.IS": 3,
+    "EMPAE.IS": 6, "ONRYT.IS": 4, "AKSA.IS": 20, "SDTTR.IS": 1,
+    "NETCD.IS": 1, "RUZYE.IS": 10, "TRALT.IS": 1, "UCAYM.IS": 1,
+    "CASH": 50000
 }
 
-# ======================
-# HELPERS
-# ======================
-def safe_float(x, d=0): 
-    try: return float(x)
-    except: return d
+def safe_float(x, d=0.0):
+    try:
+        return float(x)
+    except:
+        return d
 
 def safe_round(x, n=2):
-    try: return round(float(x), n) if pd.notna(x) else 0
-    except: return 0
+    try:
+        if pd.notna(x):
+            return round(float(x), n)
+        return 0
+    except:
+        return 0
 
-# ======================
-# TECHNICAL
-# ======================
 def get_technical(df):
     close = df['Close']
     df['ema200'] = close.ewm(span=200).mean()
 
     tr = pd.concat([
-        df['High']-df['Low'],
-        (df['High']-close.shift()).abs(),
-        (df['Low']-close.shift()).abs()
+        df['High'] - df['Low'],
+        (df['High'] - close.shift()).abs(),
+        (df['Low'] - close.shift()).abs()
     ], axis=1).max(axis=1)
 
     df['atr'] = tr.rolling(14).mean().bfill()
     df['vol'] = close.pct_change().rolling(20).std() * np.sqrt(LOOKBACK_DAYS)
 
     last = df.iloc[-1]
-    mom = close.pct_change(20).iloc[-1]
+    mom_20 = safe_float(close.pct_change(20).iloc[-1])
+    mom_60 = safe_float(close.pct_change(60).iloc[-1]) if len(close) > 60 else 0
 
-    if last['Close'] > last['ema200'] and mom > 0:
-        regime = "TREND"
-    else:
-        regime = "WEAK"
+    regime = "TREND" if last['Close'] > last['ema200'] and mom_20 > 0 else "WEAK"
 
     return {
         "price": safe_round(last['Close']),
         "atr": safe_round(last['atr']),
         "vol": safe_float(last['vol']),
+        "mom_60": mom_60,
         "regime": regime
     }
 
-# ======================
-# FUNDAMENTAL
-# ======================
-session = requests.Session()
-session.headers.update({'User-Agent': 'Mozilla/5.0'})
-
-def get_fundamental(code):
-    try:
-        url = f"https://www.isyatirim.com.tr/_layouts/15/...{code.replace('.IS','')}"
-        r = session.get(url, timeout=5)
-        data = r.json()
-        return {"growth": 10}  # sade fallback
-    except:
-        return {"growth": 0}
-
-# ======================
-# AI (SAFE)
-# ======================
-def get_ai(orders):
-    if not USE_AI:
-        return {o['code']: "✔ Sistem" for o in orders}
+def get_ai_comments(orders):
+    if not USE_AI or not orders:
+        return {o['code']: "Sistem Onaylı (AI Kapalı)" for o in orders}
 
     try:
         from google import genai
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return {o['code']: "Sistem Onaylı (API Key Yok)" for o in orders}
 
-        prompt = "JSON kısa yorum:\n"
+        client = genai.Client(api_key=api_key)
+
+        prompt = "SADECE JSON döndür:\n"
         for o in orders:
             prompt += f"{o['code']} {o['type']}\n"
 
         res = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             contents=prompt
         )
 
-        return json.loads(res.text)
-    except:
-        return {o['code']: "✔ Sistem" for o in orders}
+        txt = res.text.replace("```json", "").replace("```", "").strip()
 
-# ======================
-# MAIN
-# ======================
+        try:
+            parsed = json.loads(txt)
+            if isinstance(parsed, dict):
+                return parsed
+        except:
+            pass
+
+        return {o['code']: "Sistem Onaylı (AI Parse Hatası)" for o in orders}
+
+    except Exception:
+        return {o['code']: "Sistem Onaylı (AI Hata)" for o in orders}
+
 def main():
-    stocks = os.getenv("STOCK_LIST","THYAO.IS,AKSA.IS,TUPRS.IS,ASELS.IS,SISE.IS").split(",")
+    stock_input = os.getenv(
+        "STOCK_LIST",
+        "THYAO.IS,AKSA.IS,TUPRS.IS,ASELS.IS,SISE.IS,BIMAS.IS"
+    )
+    stocks = [s.strip().upper() for s in stock_input.split(",") if s.strip()]
 
     data = yf.download(
         tickers=" ".join(stocks),
@@ -113,111 +112,160 @@ def main():
         threads=False
     )
 
+    if data is None or data.empty or not hasattr(data, "columns"):
+        print("KRİTİK HATA: Veri alınamadı")
+        return
+
     techs = {}
     scores = {}
 
+    cols_lvl0 = []
+    if isinstance(data.columns, pd.MultiIndex):
+        try:
+            cols_lvl0 = list(data.columns.get_level_values(0))
+        except:
+            print("KRİTİK HATA: MultiIndex bozuk")
+            return
+
     for s in stocks:
         try:
-            df = data[s].dropna()
-            if len(df) < 200: continue
+            if isinstance(data.columns, pd.MultiIndex):
+                if s not in cols_lvl0:
+                    continue
+                df = data[s].copy()
+            else:
+                if len(stocks) == 1 and s == stocks[0]:
+                    df = data.copy()
+                else:
+                    continue
+
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            if not all(col in df.columns for col in required_cols):
+                continue
+
+            df = df[required_cols].dropna()
+
+            if df.empty or len(df) < 200:
+                continue
 
             t = get_technical(df)
-            score = (t['regime']=="TREND")*100
+            techs[s] = t
+
+            trend_score = 1 if t['regime'] == "TREND" else 0
+            vol_score = max(1 - t['vol'], 0)
+            mom_norm = min(max(t['mom_60'] / 0.50, 0), 1.0)
+
+            score = (trend_score * 40) + (vol_score * 30) + (mom_norm * 30)
 
             if score > 0:
-                techs[s] = t
                 scores[s] = score
-        except:
+
+        except Exception:
             continue
 
     selected = sorted(scores, key=scores.get, reverse=True)[:MAX_PORTFOLIO_SIZE]
 
-    inv = {s: 1/max(techs[s]['vol'],0.01) for s in selected}
-    total = sum(inv.values())
-    weights = {s: inv[s]/total for s in selected}
+    if not selected:
+        print("Uygun hisse yok")
+        return
+
+    all_vols = [techs[s]['vol'] for s in techs if techs[s]['vol'] > 0]
+    all_vols = [v for v in all_vols if not pd.isna(v)]
+
+    if len(all_vols) >= 4:
+        p = np.percentile(all_vols, 25)
+        MIN_VOL = max(p if not pd.isna(p) else 0.05, 0.05)
+    else:
+        MIN_VOL = 0.05
+
+    inv = {}
+    for s in selected:
+        v = techs[s]['vol']
+        if pd.isna(v) or v <= 0:
+            v = MIN_VOL
+        inv[s] = 1 / max(v, MIN_VOL)
+
+    total_inv = sum(inv.values())
+    weights = {s: inv[s] / total_inv for s in selected} if total_inv > 0 else {s: 1/len(selected) for s in selected}
+
+    for _ in range(10):
+        overweight = {s: w for s, w in weights.items() if w > MAX_WEIGHT_PER_STOCK}
+        if not overweight:
+            break
+
+        excess = sum(w - MAX_WEIGHT_PER_STOCK for w in overweight.values())
+        if excess < 1e-6:
+            break
+
+        for s in overweight:
+            weights[s] = MAX_WEIGHT_PER_STOCK
+
+        underweight = {s: w for s, w in weights.items() if w < MAX_WEIGHT_PER_STOCK}
+        total_under = sum(underweight.values())
+
+        if total_under > 0:
+            for s in underweight:
+                weights[s] += (weights[s] / total_under) * excess
+        else:
+            if len(weights) == 0:
+                print("KRİTİK HATA: weights boş")
+                return
+            equal_add = excess / len(weights)
+            for s in weights:
+                weights[s] += equal_add
+
+    weights = {s: (0 if pd.isna(w) else w) for s, w in weights.items()}
+    total_w = sum(weights.values())
+
+    if total_w > 0:
+        weights = {s: w / total_w for s, w in weights.items()}
+    else:
+        print("KRİTİK HATA: normalize başarısız")
+        return
 
     target = []
     for s in selected:
         price = techs[s]['price']
-        lot = math.floor((START_CAPITAL*weights[s])/price)
+
+        if pd.isna(price) or price < 1.0:
+            lot = 0
+        else:
+            lot = math.floor((START_CAPITAL * weights[s]) / price)
 
         target.append({
             "code": s,
             "lot": lot,
             "weight": weights[s],
-            "stop": safe_round(price - techs[s]['atr']*2.5)
+            "stop": safe_round(price - techs[s]['atr'] * 2.5)
         })
 
     orders = []
 
     for t in target:
-        curr = CURRENT_PORTFOLIO.get(t['code'],0)
+        curr = CURRENT_PORTFOLIO.get(t['code'], 0)
         if t['lot'] > curr:
-            orders.append({"type":"BUY","code":t['code'],"lot":t['lot']-curr})
+            orders.append({"type": "BUY", "code": t['code'], "lot": t['lot'] - curr})
 
-    for c,l in CURRENT_PORTFOLIO.items():
-        if c!="CASH" and not any(t['code']==c for t in target):
-            orders.append({"type":"SELL","code":c,"lot":l})
+    for c, l in CURRENT_PORTFOLIO.items():
+        if c != "CASH" and not any(t['code'] == c for t in target):
+            orders.append({"type": "SELL", "code": c, "lot": l})
 
-    ai = get_ai(orders)
+    ai_comments = get_ai_comments(orders)
 
-    # ======================
-    # HTML UI (🔥 PREMIUM)
-    # ======================
-    html = f"""
-    <style>
-    body {{font-family: Arial; background:#0b0f14; color:#e6edf3;}}
-    table {{border-collapse: collapse; width:100%; margin-top:10px;}}
-    th, td {{padding:10px; text-align:center;}}
-    th {{background:#111827; color:#9ca3af;}}
-    tr {{border-bottom:1px solid #1f2937;}}
-    .buy {{background:#052e16; color:#22c55e; font-weight:bold;}}
-    .sell {{background:#3f0d0d; color:#ef4444; font-weight:bold;}}
-    .high {{color:#22c55e;}}
-    .low {{color:#ef4444;}}
-    </style>
+    md = f"## 🏦 Apex Terminal v24.6 (20 Stocks)\n"
+    md += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
 
-    <h2>🏦 Apex Terminal v23.2</h2>
-    <b>{datetime.now().strftime('%d-%m-%Y %H:%M')}</b>
-
-    <h3>⚡ İşlem Emirleri</h3>
-    <table>
-    <tr><th>İşlem</th><th>Hisse</th><th>Lot</th><th>AI</th></tr>
-    """
+    md += "| İşlem | Hisse | Adet | AI |\n"
+    md += "| :--- | :--- | :--- | :--- |\n"
 
     for o in orders:
-        cls = "buy" if o['type']=="BUY" else "sell"
-        label = "AL" if o['type']=="BUY" else "SAT"
-
-        html += f"""
-        <tr>
-        <td class="{cls}">{label}</td>
-        <td>{o['code']}</td>
-        <td>{o['lot']}</td>
-        <td>{ai.get(o['code'])}</td>
-        </tr>
-        """
-
-    html += "</table><h3>🎯 Hedef Portföy</h3><table>"
-    html += "<tr><th>Hisse</th><th>Ağırlık</th><th>Lot</th><th>Stop</th></tr>"
-
-    for t in target:
-        w_cls = "high" if t['weight']>0.25 else "low"
-        html += f"""
-        <tr>
-        <td>{t['code']}</td>
-        <td class="{w_cls}">%{t['weight']*100:.1f}</td>
-        <td>{t['lot']}</td>
-        <td>{t['stop']}</td>
-        </tr>
-        """
-
-    html += "</table>"
+        islem = "🟩 AL" if o['type'] == "BUY" else "🟥 SAT"
+        md += f"| {islem} | {o['code']} | {o['lot']} | {ai_comments.get(o['code'], 'Sistem Onaylı')} |\n"
 
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
-            f.write(html)
+            f.write(md)
 
 if __name__ == "__main__":
     main()
