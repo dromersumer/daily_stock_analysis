@@ -42,7 +42,7 @@ CURRENT_PORTFOLIO = {
     "SOKM.IS": 10,
     "KONTR.IS": 55,
     "MAVI.IS": 10,
-    "CASH": 25000  # Sistemdeki serbest nakit miktarın
+    "CASH": 50000  # Sistemdeki serbest nakit miktarın
 }
 
 # ================================
