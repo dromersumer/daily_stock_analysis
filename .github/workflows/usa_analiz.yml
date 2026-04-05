@@ -1,43 +1,31 @@
 name: ABD Stratejik Analiz 🇺🇸
 
 on:
-  workflow_dispatch: # Manuel çalıştırma butonu
+  schedule:
+    - cron: '30 20 * * 1-5'
+  workflow_dispatch: 
 
 jobs:
-  analyze:
+  run-portfolio-manager:
     runs-on: ubuntu-latest
     steps:
-      - name: Kodu Cek
+      - name: 📥 Kodu Klonla
         uses: actions/checkout@v4
-      
-      - name: Python Kur
+
+      - name: 🐍 Python 3.12 Kurulumu (Google AI Uyumluluğu İçin)
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
-      # --- KRİTİK ADIM: PDF motoru için gerekli sistem dosyalarını yükler ---
-      - name: Sistem Kutuphanelerini Yukle
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcairo2-dev pkg-config python3-dev
-
-      - name: Kutuphaneleri Yukle
+      - name: ⚙️ Gerekli Kütüphaneleri Yükle
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Analizi Gerceklestir
+      - name: 🚀 Apex Quant Motorunu Çalıştır (ABD)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PORTFOLIO_TYPE: "ABD"
-          # Sizin güncel 21 hisselik ABD teknoloji listeniz:
-          STOCK_LIST: "ADI,AMAT,ASML,AVGO,ASX,AXTI,BABA,CEG,GOOG,INTC,MU,NET,NVDA,NVTS,QBTS,REI,RGTI,TSM,UUUU,VRT,WDC"
+          PORTFOLIO_CAPITAL: ${{ vars.PORTFOLIO_CAPITAL || '100000' }}
+          STOCK_LIST: ${{ vars.STOCK_LIST || 'ADI,AMAT,ASML,AVGO,ASX,AXTI,BABA,CEG,GOOG,INTC,MU,NET,NVDA,NVTS,QBTS,REI,RGTI,TSM,UUUU,VRT,WDC' }}
         run: python main.py
-
-      - name: Google Drive'a PDF Yukle
-        uses: adityak74/google-drive-upload-git-action@main
-        with:
-          credentials: ${{ secrets.GDRIVE_CREDENTIALS }}
-          filename: reports/*.pdf
-          folderId: ${{ secrets.GDRIVE_FOLDER_ID }}
-          overwrite: false
