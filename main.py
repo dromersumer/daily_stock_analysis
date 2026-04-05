@@ -5,22 +5,36 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 
-START_CAPITAL = 100000
+# --- 1. PORTFÖY TİPİ VE DİNAMİK DEĞİŞKENLER ---
+PORTFOLIO_TYPE = os.getenv("PORTFOLIO_TYPE", "BIST").upper() # Varsayılan BIST
+START_CAPITAL = float(os.getenv("PORTFOLIO_CAPITAL", "100000")) 
 MAX_PORTFOLIO_SIZE = 20
 MAX_WEIGHT_PER_STOCK = 0.35
 LOOKBACK_DAYS = 252
 USE_AI = os.getenv("USE_AI", "false").lower() == "true"
+CURRENCY = "$" if PORTFOLIO_TYPE == "ABD" else "₺"
 
-CURRENT_PORTFOLIO = {
-    "ASELS.IS": 71, "ASTOR.IS": 26, "BIMAS.IS": 5, "KATMR.IS": 1000,
-    "AKSEN.IS": 20, "OTKAR.IS": 3, "FROTO.IS": 10, "SISE.IS": 23,
-    "ODINE.IS": 1, "MIATK.IS": 21, "TUPRS.IS": 3, "ALTNY.IS": 42.5,
-    "THYAO.IS": 2, "KCHOL.IS": 3, "ISMEN.IS": 12, "RALYH.IS": 2.28,
-    "SOKM.IS": 10, "KONTR.IS": 55, "MAVI.IS": 10, "PASEU.IS": 3,
-    "EMPAE.IS": 6, "ONRYT.IS": 4, "AKSA.IS": 20, "SDTTR.IS": 1,
-    "NETCD.IS": 1, "RUZYE.IS": 10, "TRALT.IS": 1, "UCAYM.IS": 1,
-    "CASH": 50000
-}
+# Dinamik Portföy Seçimi
+if PORTFOLIO_TYPE == "ABD":
+    CURRENT_PORTFOLIO = {
+        "NVDA": 3.539, "QQQM": 3, "AVGO": 1.526, "SPUS": 9, "INTC": 7,
+        "GOOG": 1.0063, "MU": 0.54, "BABA": 1.278, "LITE": 0.125,
+        "SMH": 0.257, "SCHD": 3, "CAT": 0.1, "CHAT": 1, "XLE": 1,
+        "NVTS": 6, "QQQI": 1, "GNRC": 0.25, "REMX": 0.5, "TSM": 0.1,
+        "ADI": 0.09, "RGTI": 2, "UUUU": 1, "QBTS": 1, "REI": 4,
+        "CASH": 10000 # Örnek ABD nakitiniz
+    }
+else:
+    CURRENT_PORTFOLIO = {
+        "ASELS.IS": 71, "ASTOR.IS": 26, "BIMAS.IS": 5, "KATMR.IS": 1000,
+        "AKSEN.IS": 20, "OTKAR.IS": 3, "FROTO.IS": 10, "SISE.IS": 23,
+        "ODINE.IS": 1, "MIATK.IS": 21, "TUPRS.IS": 3, "ALTNY.IS": 42.5,
+        "THYAO.IS": 2, "KCHOL.IS": 3, "ISMEN.IS": 12, "RALYH.IS": 2.28,
+        "SOKM.IS": 10, "KONTR.IS": 55, "MAVI.IS": 10, "PASEU.IS": 3,
+        "EMPAE.IS": 6, "ONRYT.IS": 4, "AKSA.IS": 20, "SDTTR.IS": 1,
+        "NETCD.IS": 1, "RUZYE.IS": 10, "TRALT.IS": 1, "UCAYM.IS": 1,
+        "CASH": 50000
+    }
 
 def safe_float(x, d=0.0):
     try:
@@ -75,7 +89,10 @@ def get_ai_comments(orders):
 
         client = genai.Client(api_key=api_key)
 
-        prompt = "SADECE JSON döndür:\n"
+        # --- 2. YAPAY ZEKA BAĞLAMI ---
+        context = "BIST hisseleri ve Türkiye piyasası" if PORTFOLIO_TYPE == "BIST" else "ABD Teknoloji/ETF piyasası ve küresel trendler"
+        
+        prompt = f"Şu {context} işlemleri için kısa, profesyonel gerekçeler üret. SADECE bir JSON objesi döndür. Key: hisse kodu, Value: gerekçe.\n"
         for o in orders:
             prompt += f"{o['code']} {o['type']}\n"
 
@@ -99,11 +116,15 @@ def get_ai_comments(orders):
         return {o['code']: "Sistem Onaylı (AI Hata)" for o in orders}
 
 def main():
-    stock_input = os.getenv(
-        "STOCK_LIST",
-        "THYAO.IS,AKSA.IS,TUPRS.IS,ASELS.IS,SISE.IS,BIMAS.IS"
-    )
+    # Varsayılan listeler pazar tipine göre belirleniyor
+    default_list = "ADI,AVGO,CAT,CHAT,GNRC,GOOG,INTC,LITE,MU,NVDA,NVTS,QQQI,QQQM,REMX,SCHD,SMH,SPUS,TSM,XLE" if PORTFOLIO_TYPE == "ABD" else "THYAO.IS,AKSA.IS,TUPRS.IS,ASELS.IS,SISE.IS,BIMAS.IS"
+    stock_input = os.getenv("STOCK_LIST", default_list)
+    
     stocks = [s.strip().upper() for s in stock_input.split(",") if s.strip()]
+
+    # ABD pazarında ".IS" olanlar varsa temizle (olası bir hata girişini önlemek için)
+    if PORTFOLIO_TYPE == "ABD":
+        stocks = [s.replace(".IS", "") for s in stocks]
 
     data = yf.download(
         tickers=" ".join(stocks),
@@ -246,7 +267,6 @@ def main():
             "stop": safe_round(price - techs[s]['atr'] * 2.5)
         })
 
-    # ✅ HEDEF PORTFÖYÜ AĞIRLIĞA GÖRE (BÜYÜKTEN KÜÇÜĞE) SIRALAMA
     target = sorted(target, key=lambda x: x['weight'], reverse=True)
 
     orders = []
@@ -254,7 +274,7 @@ def main():
     for t in target:
         curr = CURRENT_PORTFOLIO.get(t['code'], 0)
         if t['lot'] > curr:
-            orders.append({"type": "BUY", "code": t['code'], "lot": t['lot'] - curr})
+            orders.append({"type": "BUY", "code": t['code'], "lot": round(t['lot'] - curr, 4)})
 
     for c, l in CURRENT_PORTFOLIO.items():
         if c != "CASH" and not any(t['code'] == c for t in target):
@@ -262,8 +282,10 @@ def main():
 
     ai_comments = get_ai_comments(orders)
 
-    md = f"## 🏦 Apex Terminal v24.7 (Quant Engine)\n"
-    md += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n\n"
+    # --- 3. RAPORLAMA (DİNAMİK PARA BİRİMİ İLE) ---
+    md = f"## 🏦 Apex Terminal v25.0 ({PORTFOLIO_TYPE} Quant Engine)\n"
+    md += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n"
+    md += f"Sermaye: {START_CAPITAL:,.2f} {CURRENCY}\n\n"
 
     md += "### ⚡ İŞLEM EMİRLERİ\n"
     md += "| İşlem | Hisse | Adet | AI |\n"
@@ -274,16 +296,18 @@ def main():
         md += f"| {islem} | **{o['code']}** | {o['lot']} | {ai_comments.get(o['code'], 'Sistem Onaylı')} |\n"
 
     md += "\n---\n### 🎯 HEDEF PORTFÖY\n"
-    md += "| Hisse | Ağırlık | Lot | İzleyen Stop |\n"
-    md += "| :--- | :--- | :--- | :--- |\n"
+    md += f"| Hisse | Ağırlık | Lot | İzleyen Stop |\n"
+    md += f"| :--- | :--- | :--- | :--- |\n"
 
     for t in target:
-        md += f"| **{t['code']}** | %{t['weight']*100:.1f} | {t['lot']} | {t['stop']} ₺ |\n"
+        md += f"| **{t['code']}** | %{t['weight']*100:.1f} | {t['lot']} | {t['stop']} {CURRENCY} |\n"
 
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
             f.write(md)
+    else:
+        print(md)
 
 if __name__ == "__main__":
     main()
