@@ -2,7 +2,7 @@ name: BIST Quant-AI Terminal
 
 on:
   schedule:
-    - cron: '30 15 * * 1-5' 
+    - cron: '30 15 * * 1-5' # Hafta içi her gün TSİ 18:30 (BIST Kapanış Sonrası)
   workflow_dispatch: 
 
 jobs:
@@ -22,10 +22,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 🚀 Apex Quant Motorunu Çalıştır (v21.0)
+      - name: 🚀 Apex Quant Motorunu Çalıştır (BIST)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           EVDS_API_KEY: ${{ secrets.EVDS_API_KEY }}
+          PORTFOLIO_TYPE: "BIST"
           PORTFOLIO_CAPITAL: ${{ vars.PORTFOLIO_CAPITAL || '100000' }}
-          STOCK_LIST: ${{ vars.STOCK_LIST || 'AKSA.IS,ASELS.IS,ASTOR.IS,BIMAS.IS,KATMR.IS,AKSEN.IS,OTKAR.IS,FROTO.IS,SISE.IS,ODINE.IS,MIATK.IS,TUPRS.IS,ALTNY.IS,THYAO.IS,KCHOL.IS,ISMEN.IS,RALYH.IS,SOKM.IS,KONTR.IS,MAVI.IS' }}
+          STOCK_LIST: ${{ vars.STOCK_LIST || 'AKSA.IS,AKSEN.IS,ALTNY.IS,ASELS.IS,ASTOR.IS,BIMAS.IS,EMPAE.IS,FROTO.IS,ISMEN.IS,KATMR.IS,KCHOL.IS,KONTR.IS,MAVI.IS,MIATK.IS,NETCD.IS,ODINE.IS,ONRYT.IS,OTKAR.IS,PASEU.IS,PETKM.IS,RALYH.IS,RUZYE.IS,SDTTR.IS,SISE.IS,SOKM.IS,THYAO.IS,TUPRS.IS' }}
         run: python main.py
