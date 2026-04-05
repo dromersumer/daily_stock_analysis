@@ -17,7 +17,7 @@ CURRENCY = "$" if PORTFOLIO_TYPE == "ABD" else "₺"
 # Dinamik Portföy Seçimi
 if PORTFOLIO_TYPE == "ABD":
     CURRENT_PORTFOLIO = {
-        "NVDA": 3.539, "QQQM": 3, "AVGO": 1.526, "SPUS": 9, "INTC": 7,
+        "QQQM": 3, "NVDA": 3.539, "AVGO": 1.526, "SPUS": 9, "INTC": 7,
         "GOOG": 1.0063, "MU": 0.54, "BABA": 1.278, "LITE": 0.125,
         "SMH": 0.257, "SCHD": 3, "CAT": 0.1, "CHAT": 1, "XLE": 1,
         "NVTS": 6, "QQQI": 1, "GNRC": 0.25, "REMX": 0.5, "TSM": 0.1,
@@ -264,6 +264,7 @@ def main():
             "code": s,
             "lot": lot,
             "weight": weights[s],
+            "price": price, # --- SON FİYAT EKLENDİ ---
             "stop": safe_round(price - techs[s]['atr'] * 2.5)
         })
 
@@ -282,7 +283,7 @@ def main():
 
     ai_comments = get_ai_comments(orders)
 
-    # --- 3. RAPORLAMA (DİNAMİK PARA BİRİMİ İLE) ---
+    # --- 3. RAPORLAMA (DİNAMİK PARA BİRİMİ VE SON FİYAT İLE) ---
     md = f"## 🏦 Apex Terminal v25.0 ({PORTFOLIO_TYPE} Quant Engine)\n"
     md += f"Tarih: {datetime.now().strftime('%d-%m-%Y %H:%M')}\n"
     md += f"Sermaye: {START_CAPITAL:,.2f} {CURRENCY}\n\n"
@@ -296,11 +297,11 @@ def main():
         md += f"| {islem} | **{o['code']}** | {o['lot']} | {ai_comments.get(o['code'], 'Sistem Onaylı')} |\n"
 
     md += "\n---\n### 🎯 HEDEF PORTFÖY\n"
-    md += f"| Hisse | Ağırlık | Lot | İzleyen Stop |\n"
-    md += f"| :--- | :--- | :--- | :--- |\n"
+    md += f"| Hisse | Ağırlık | Lot | Son Fiyat | İzleyen Stop |\n"
+    md += f"| :--- | :--- | :--- | :--- | :--- |\n"
 
     for t in target:
-        md += f"| **{t['code']}** | %{t['weight']*100:.1f} | {t['lot']} | {t['stop']} {CURRENCY} |\n"
+        md += f"| **{t['code']}** | %{t['weight']*100:.1f} | {t['lot']} | {t['price']} {CURRENCY} | {t['stop']} {CURRENCY} |\n"
 
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
