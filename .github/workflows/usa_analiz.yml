@@ -1,31 +1,32 @@
-name: ABD Borsa Analiz Ömer
+name: USA Portfolio Analysis
 
 on:
   schedule:
-    - cron: '30 20 * * 1-5'
-  workflow_dispatch: 
+    - cron: '30 18 * * 1-5' # Hafta içi her gün TSİ 18:30 civarı çalışır
+  workflow_dispatch:      # Manuel tetikleme için
 
 jobs:
   run-portfolio-manager:
     runs-on: ubuntu-latest
     steps:
-      - name: 📥 Kodu Klonla
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍 Python 3.12 Kurulumu (Google AI Uyumluluğu İçin)
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: ⚙️ Gerekli Kütüphaneleri Yükle
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 🚀 Apex Quant Motorunu Çalıştır (ABD)
+      - name: Run USA Quant Engine
         env:
+          PORTFOLIO_TYPE: 'ABD'
+          PORTFOLIO_CAPITAL: '10000'
+          STOCK_LIST: 'QQQM,NVDA,AVGO,SPUS,INTC,GOOG,SCHD,MU,SMH,LITE,CAT,CHAT,PL,NVTS,NASA,XLE,QQQI,TSM'
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          PORTFOLIO_TYPE: "ABD"
-          PORTFOLIO_CAPITAL: ${{ vars.PORTFOLIO_CAPITAL || '100000' }}
-          STOCK_LIST: ${{ vars.STOCK_LIST || 'ADI,AVGO,CAT,CHAT,GNRC,GOOG,INTC,LITE,MU,NVDA,NVTS,QQQI,QQQM,REMX,SCHD,SMH,SPUS,TSM,XLE' }}
+          WOLFRAM_ALPHA_APPID: ${{ secrets.WOLFRAM_ALPHA_APPID }}
         run: python main.py
