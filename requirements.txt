@@ -1,6 +1,5 @@
-google-genai
 yfinance
 pandas
 numpy
-requests
-json-repair
+google-genai
+wolframalpha
