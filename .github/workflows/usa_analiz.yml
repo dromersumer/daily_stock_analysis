@@ -2,8 +2,8 @@ name: USA Portfolio Analysis
 
 on:
   schedule:
-    - cron: '30 18 * * 1-5' # Hafta içi her gün TSİ 18:30 civarı çalışır
-  workflow_dispatch:      # Manuel tetikleme için
+    - cron: '0 20 * * 1-5' # Hafta içi her gün TSİ 23:00 (Borsa Kapanışı)
+  workflow_dispatch:      # Manuel çalıştırma için
 
 jobs:
   run-portfolio-manager:
@@ -29,4 +29,5 @@ jobs:
           STOCK_LIST: 'QQQM,NVDA,AVGO,SPUS,INTC,GOOG,SCHD,MU,SMH,LITE,CAT,CHAT,PL,NVTS,NASA,XLE,QQQI,TSM'
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WOLFRAM_ALPHA_APPID: ${{ secrets.WOLFRAM_ALPHA_APPID }}
+          USE_AI: 'true'
         run: python main.py
