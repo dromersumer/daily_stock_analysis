@@ -1,4 +1,4 @@
-name: USA Portfolio Watch
+name: USA Portfolio Watch & Strategy
 
 on:
   push:
@@ -7,10 +7,10 @@ on:
 
 permissions:
   contents: read
-  actions: write      # Summary sayfasına yazma izni
+  actions: write      # GitHub Summary sayfasına yazma izni
 
 jobs:
-  run-portfolio-watch:
+  run-apex-terminal:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -24,11 +24,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # portfolio_watch.py için gerekli kütüphaneler
-          pip install yfinance pandas requests
+          pip install yfinance pandas requests numpy
 
       - name: Run Apex Terminal Watcher
-        env:
-          # Eğer gelecekte API anahtarına ihtiyaç duyarsanız buraya ekleyebilirsiniz
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python portfolio_watch.py
+
+      - name: Run Strategy Engine
+        env:
+          # Opsiyonel: Eşiği özelleştirmek istersen buradan değiştir
+          VOL_LOW_THRESHOLD: "30.0"
+        run: python strategy_engine.py
