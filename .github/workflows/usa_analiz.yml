@@ -26,7 +26,8 @@ jobs:
         env:
           PORTFOLIO_TYPE: 'ABD'
           PORTFOLIO_CAPITAL: '10000'
-          STOCK_LIST: 'QQQM,NVDA,AVGO,SPUS,INTC,GOOG,SCHD,MU,SMH,LITE,CAT,CHAT,PL,NVTS,NASA,XLE,QQQI,TSM'
+          # Güncellenmiş portföy listesi:
+          STOCK_LIST: 'VOO,SCHD,QQQM,SPUS,VXUS,O,WPC,SMH,AIS,NASA,EUV,CHAT,NVDA,AVGO,GOOG,CAT,LENZ,ASPI'
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           WOLFRAM_ALPHA_APPID: ${{ secrets.WOLFRAM_ALPHA_APPID }}
           USE_AI: 'true'
