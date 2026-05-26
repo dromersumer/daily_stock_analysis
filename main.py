@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Apex Terminal — Quant Engine v25.6
-Bloomberg-grade autonomous portfolio manager.
-Architecture: Data → Analytics (ATR/Vol/Risk Parity) → Risk Alerting → AI Layer
+Apex Terminal — Quant Engine v25.7
+Architecture: Data Pipeline → Tech Analytics → Risk Alerting → Gemini AI → GitHub Summary
 """
 
 import os
@@ -47,7 +46,7 @@ except: CURRENT_PORTFOLIO = {}
 # ── Analiz Fonksiyonları ──────────────────────────────────────────────────────
 
 def get_technical(df: pd.DataFrame) -> Optional[dict]:
-    if len(df) < 201: return None
+    if df is None or len(df) < 201: return None
     close = df["Close"].astype(float)
     high  = df["High"].astype(float)
     low   = df["Low"].astype(float)
@@ -60,7 +59,7 @@ def get_technical(df: pd.DataFrame) -> Optional[dict]:
         "price": round(float(close.iloc[-1]), 4),
         "atr": round(float(atr.iloc[-1]), 4),
         "vol": float(vol.iloc[-1]),
-        "rsi": round(float(50.0), 2), # Basitleştirildi
+        "rsi": round(float(50.0), 2),
         "regime": "TREND" if float(close.iloc[-1]) > float(ema200.iloc[-1]) else "WEAK"
     }
 
@@ -75,25 +74,37 @@ def check_correlation_risks(candidates, corr_matrix, threshold):
                     alerts.append({"pair": f"{s1} - {s2}", "rho": round(float(rho), 3), "msg": "Yüksek korelasyon uyarısı."})
     return alerts
 
-# ── Raporlama ve Ana Motor ──────────────────────────────────────────────────
+# ── Ana Motor ──────────────────────────────────────────────────────────────
 
 def main():
     run_ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     stocks = [s.strip().upper() for s in os.getenv("STOCK_LIST", "VOO,SCHD,QQQM,SPUS,VXUS,O,WPC,SMH,NVDA,AVGO,GOOG,CAT,ASPI").split(",") if s.strip()]
     
     raw = yf.download(tickers=stocks, period="2y", group_by="ticker", progress=False)
-    techs = {s: get_technical(raw[s].dropna()) for s in stocks if s in raw.columns.get_level_values(0) and get_technical(raw[s])}
     
+    # Teknik analiz sonuçlarını None değerlerinden arındırarak sözlüğe ekle
+    techs = {}
+    for s in stocks:
+        if s in raw.columns.get_level_values(0):
+            df = raw[s].dropna(how="all")
+            tech = get_technical(df)
+            if tech is not None:
+                techs[s] = tech
+    
+    if not techs:
+        log.error("Analiz edilebilir teknik veri bulunamadı.")
+        return
+
     # Skorlama
     scores = {s: (40 if t["regime"] == "TREND" else 0) + (max(1 - t["vol"], 0) * 30) for s, t in techs.items()}
     selected = sorted(scores, key=scores.get, reverse=True)[:MAX_PORTFOLIO_SIZE]
     
-    # Korelasyon Analizi (Bilgilendirme Amaçlı)
+    # Korelasyon Analizi
     log_rets = pd.DataFrame({s: np.log(raw[s]["Close"] / raw[s]["Close"].shift(1)) for s in selected}).dropna(how="all")
     corr_matrix = log_rets.corr()
     risk_alerts = check_correlation_risks(selected, corr_matrix, CORR_THRESHOLD)
 
-    # Risk Parity
+    # Risk Parity (Ağırlık)
     inv_vol = {s: 1.0 / max(techs[s]["vol"], 0.05) for s in selected}
     weights = {s: inv_vol[s] / sum(inv_vol.values()) for s in selected}
 
@@ -104,7 +115,7 @@ def main():
         target.append({"code": s, "lot": math.floor((START_CAPITAL * weights[s]) / price), "price": price, "stop": stop, "vol": vol})
 
     # Rapor Oluşturma
-    md = f"# 🏦 Apex Terminal v25.6\n\n### 📝 Terimler Sözlüğü\n| Terim | Açıklama |\n| :--- | :--- |\n| **V** | Yıllık oynaklık (yüksek V = yüksek risk). |\n| **Dinamik Stop** | Fiyat - (ATR * (2.0 + V*2.0)). |\n| **ρ (Rho)** | Korelasyon. | \n\n"
+    md = f"# 🏦 Apex Terminal v25.7\n\n### 📝 Terimler Sözlüğü\n| Terim | Açıklama |\n| :--- | :--- |\n| **V** | Yıllık oynaklık (yüksek V = yüksek risk). |\n| **Dinamik Stop** | Fiyat - (ATR * (2.0 + V*2.0)). |\n\n"
     
     if risk_alerts:
         md += "### ⚠️ Korelasyon Risk Uyarıları\n| Hisse Çifti | ρ (Rho) | Durum |\n| :--- | ---: | :--- |\n"
