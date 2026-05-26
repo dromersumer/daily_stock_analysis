@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Apex Terminal — Quant Engine v26.4
-Fix: Full Float support for fractional lots and robust parsing
+Apex Terminal — Quant Engine v26.5
+Fix: Dynamic header detection and float robustness
 """
 
 import os
@@ -20,17 +20,31 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1Qr3gmOTXV0dbXolT_ASj1avoBIL
 def get_portfolio():
     try:
         response = requests.get(SHEET_URL)
-        # Virgül (,) karakterini nokta (.) ile değiştirip sayısal yapıya hazırla
+        response.raise_for_status()
+        
+        # Virgül varsa noktaya çevir
         csv_data = response.text.replace(',', '.')
         df = pd.read_csv(io.StringIO(csv_data))
         
-        # Sütun isimlerindeki boşlukları temizle
-        df.columns = df.columns.str.strip()
+        # Sütun isimlerini temizle (boşlukları sil ve hepsini küçük harfe çevir)
+        df.columns = df.columns.str.strip().str.lower()
         
-        # HATA DÜZELTME: Lot miktarlarını ondalıklı (float) olarak işle
-        df['Lot'] = pd.to_numeric(df['Lot'], errors='coerce').fillna(0.0).astype(float)
+        # Dinamik sütun eşleştirme: 'lot' veya 'adet' içeren, 'hisse' veya 'ticker' içeren
+        lot_col = next((col for col in df.columns if 'lot' in col or 'adet' in col), None)
+        hisse_col = next((col for col in df.columns if 'hisse' in col or 'ticker' in col), None)
         
-        return dict(zip(df['Hisse'], df['Lot']))
+        if not lot_col or not hisse_col:
+            log.error(f"Sütunlar bulunamadı! Mevcut başlıklar: {list(df.columns)}")
+            return {}
+            
+        # Veriyi temizle ve float'a çevir
+        df[lot_col] = pd.to_numeric(df[lot_col], errors='coerce').fillna(0.0).astype(float)
+        
+        # Hisse isimlerini temizle (boşlukları al)
+        df[hisse_col] = df[hisse_col].astype(str).str.strip()
+        
+        return dict(zip(df[hisse_col], df[lot_col]))
+        
     except Exception as e:
         log.error(f"Sheets verisi alınamadı: {e}")
         return {}
@@ -43,17 +57,13 @@ def get_technical(df):
     atr = (high - low).rolling(14).mean()
     vol = close.pct_change().rolling(20).std() * math.sqrt(252)
     last_price = float(close.iloc[-1])
-    # Dinamik Stop: ATR * 2.5
     stop = last_price - (float(atr.iloc[-1]) * 2.5)
-    return {"price": last_price, "atr": float(atr.iloc[-1]), "vol": float(vol.iloc[-1]), "stop": round(stop, 2)}
+    return {"price": last_price, "stop": round(stop, 2), "vol": float(vol.iloc[-1])}
 
 def main():
     portfolio = get_portfolio()
-    if not portfolio: 
-        log.error("Portföy yüklenemedi!")
-        return
+    if not portfolio: return
     
-    # Veri indirme
     raw = yf.download(tickers=list(portfolio.keys()), period="2y", group_by="ticker", progress=False)
     
     analysis = []
@@ -69,8 +79,7 @@ def main():
 
     if total_value == 0: return
 
-    # Rapor Oluşturma
-    md = "# 🏦 Apex Terminal v26.4 (Stable & Fractional)\n\n| Hisse | Lot | Fiyat | Ağırlık | Stop Loss | V |\n| :--- | ---: | ---: | ---: | ---: | ---: |\n"
+    md = "# 🏦 Apex Terminal v26.5\n\n| Hisse | Lot | Fiyat | Ağırlık | Stop Loss | V |\n| :--- | ---: | ---: | ---: | ---: | ---: |\n"
     for t in analysis:
         weight = (t["val"] / total_value) * 100
         md += f"| **{t['code']}** | {t['lot']:.3f} | {t['price']:.2f} | %{weight:.1f} | {t['stop']:.2f} | {t['vol']:.2f} |\n"
