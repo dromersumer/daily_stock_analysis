@@ -11,8 +11,6 @@ try:
 except ImportError:
     google_genai = None
 
-from data_provider.wolfram_provider import WolframValuationProvider
-
 # --- 1. PORTFÖY TİPİ VE DİNAMİK DEĞİŞKENLER ---
 PORTFOLIO_TYPE = os.getenv("PORTFOLIO_TYPE", "BIST").upper()
 
@@ -35,7 +33,7 @@ if PORTFOLIO_TYPE == "ABD":
         "NASA": 2,         "EUV": 0,          "CHAT": 1,
         "NVDA": 3.539,     "AVGO": 1.526,     "GOOG": 1.0063,
         "CAT": 0.1,        "LENZ": 0,         "ASPI": 0,
-        "CASH": 0          # Çifte sayımı önlemek için 0 yapıldı (START_CAPITAL zaten 10.000 $)
+        "CASH": 0          
     }
 else:
     CURRENT_PORTFOLIO = {
@@ -45,7 +43,7 @@ else:
         "KATMR.IS": 1000,  "KCHOL.IS": 6,     "KONTR.IS": 115,
         "MIATK.IS": 27,    "ODINE.IS": 1,     "OTKAR.IS": 3,
         "RALYH.IS": 12.28, "SISE.IS": 36,     "THYAO.IS": 2,
-        "TUPRS.IS": 10,    "CASH": 100000     # TL bazlı nakit
+        "TUPRS.IS": 10,    "CASH": 100000     
     }
 
 def safe_float(x, d=0.0):
@@ -83,36 +81,42 @@ def get_technical(df):
         "regime": regime
     }
 
-def get_ai_comments(orders):
-    wolfram = WolframValuationProvider()
+def get_ai_comments(orders, techs):
     comments = {}
+    client = None
+    
+    if USE_AI and google_genai is not None:
+        try:
+            api_key = os.getenv("GEMINI_API_KEY")
+            if api_key:
+                client = google_genai.Client(api_key=api_key)
+        except Exception:
+            pass
+
     for o in orders:
-        hisse_kodu = o['code'].replace(".IS", "")
-        wolfram_notu = wolfram.get_stock_valuation(hisse_kodu) or ""
-
-        # GİTHUB ACTIONS LOGLARI İÇİN HATA AYIKLAMA (DEBUG)
-        print(f"[WOLFRAM DEBUG] {hisse_kodu} Yanıtı: {wolfram_notu}")
-
-        if "Veri bulunamadı" in wolfram_notu or "Hata" in wolfram_notu or not wolfram_notu:
-            wolfram_ozet = "Analiz Bekleniyor"
-        else:
-            wolfram_ozet = wolfram_notu.split('\n')[0][:50]
-
-        if USE_AI and google_genai is not None:
+        code = o['code']
+        t = techs.get(code, {})
+        
+        if client and t:
             try:
-                api_key = os.getenv("GEMINI_API_KEY")
-                if api_key:
-                    client = google_genai.Client(api_key=api_key)
-                    prompt = (
-                        f"{o['code']} için şu Wolfram verilerine dayanarak "
-                        f"kısa bir yatırım yorumu yap: {wolfram_notu[:300]}"
-                    )
-                    res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
-                    comments[o['code']] = f"🤖 {res.text[:65]}..."
-                    continue
-            except Exception: pass
-
-        comments[o['code']] = f"📊 Wolfram: {wolfram_ozet}..."
+                price = t.get('price', 0)
+                regime = "Yükseliş Trendi" if t.get('regime') == "TREND" else "Zayıf/Düşüş Eğilimi"
+                mom = t.get('mom_60', 0) * 100 # Yüzdelik momentum
+                
+                prompt = (
+                    f"Sen usta bir finansal algoritmik analistsin. '{code}' sembollü varlık için şu anki "
+                    f"teknik verilere bak: Fiyat: {price}, Genel Durum: {regime}, 60 Günlük Momentum: %{mom:.1f}. "
+                    f"Buna dayanarak en fazla 10-12 kelimelik, çok net, direkt ve Türkçe bir durum değerlendirmesi yaz. "
+                    f"Sadece yorumu ver, başka bir şey yazma."
+                )
+                res = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
+                yorum = res.text.strip().replace('\n', ' ')
+                comments[code] = f"🤖 {yorum}"
+            except Exception as e:
+                comments[code] = "🤖 API Yanıt Vermedi."
+        else:
+            comments[code] = f"⚙️ Teknik: {t.get('regime', 'N/A')}"
+            
     return comments
 
 def apply_weight_cap_and_renormalize(weights, cap=MAX_WEIGHT_PER_STOCK):
@@ -198,7 +202,8 @@ def main():
         if c != "CASH" and l > 0 and not any(t['code'] == c for t in target):
             orders.append({"type": "SELL", "code": c, "lot": l})
 
-    ai_comments = get_ai_comments(orders)
+    # AI Yorumlarını Al (Artık teknik verileri göndererek)
+    ai_comments = get_ai_comments(orders, techs)
 
     # Markdown Raporu Oluşturma
     md = f"## 🏦 Apex Terminal v25.3 ({PORTFOLIO_TYPE} Quant Engine)\n"
@@ -206,8 +211,8 @@ def main():
     md += f"Başlangıç Sermayesi: {START_CAPITAL:,.2f} {CURRENCY}\n"
     md += f"Mevcut Nakit: {available_cash:,.2f} {CURRENCY}\n"
     md += f"Etkin Sermaye: {effective_capital:,.2f} {CURRENCY}\n\n"
-    md += "### ⚡ İŞLEM EMİRLERİ (Wolfram Analizli)\n"
-    md += "| İşlem | Hisse | Adet | AI / Wolfram Değerleme |\n"
+    md += "### ⚡ İŞLEM EMİRLERİ (Gemini AI Analizli)\n"
+    md += "| İşlem | Hisse | Adet | Yapay Zeka (Gemini) Değerlemesi |\n"
     md += "| :--- | :--- | :--- | :--- |\n"
 
     for o in orders:
