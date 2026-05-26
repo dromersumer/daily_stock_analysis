@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Apex Terminal — Quant Engine v26.0
-Architecture: Dynamic Portfolio Sync (via Google Sheets)
+Apex Terminal — Quant Engine v26.1
+Features: Dynamic Sync + Weight Analysis + Dynamic Stop Loss
 """
 
 import os
@@ -12,69 +12,55 @@ import sys
 import pandas as pd
 import yfinance as yf
 import requests
-from datetime import datetime, timezone
 
-# ── Logging ─────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("ApexTerminal")
 
-# ── Konfigürasyon ──────────────────────────────────────────────────────────
-START_CAPITAL = float(os.getenv("PORTFOLIO_CAPITAL", "10000"))
-MAX_PORTFOLIO_SIZE = int(os.getenv("MAX_PORTFOLIO_SIZE", "19"))
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1Qr3gmOTXV0dbXolT_ASj1avoBILHUIIiVfqPoSX83M0/export?format=csv"
 
-def get_portfolio_from_sheets():
+def get_portfolio():
     try:
         response = requests.get(SHEET_URL)
-        response.raise_for_status()
         df = pd.read_csv(io.StringIO(response.text))
-        # Hisse ve Lot sütunlarını sözlüğe çevir
         return dict(zip(df['Hisse'], df['Lot']))
     except Exception as e:
         log.error(f"Sheets okuma hatası: {e}")
         return {}
 
-# ── Analiz Fonksiyonları ────────────────────────────────────────────────────
-def get_technical(df: pd.DataFrame):
+def get_technical(df):
     if df is None or len(df) < 201: return None
     close = df["Close"].astype(float)
+    high = df["High"].astype(float)
+    low = df["Low"].astype(float)
+    atr = (high - low).rolling(14).mean()
     vol = close.pct_change().rolling(20).std() * math.sqrt(252)
-    ema200 = close.ewm(span=200, adjust=False).mean()
-    atr = (df["High"] - df["Low"]).rolling(14).mean()
-    return {
-        "price": float(close.iloc[-1]),
-        "vol": float(vol.iloc[-1]),
-        "atr": float(atr.iloc[-1]),
-        "regime": "TREND" if close.iloc[-1] > ema200.iloc[-1] else "WEAK"
-    }
+    last_price = float(close.iloc[-1])
+    # Dinamik Stop: ATR * 2.5 (Volatility-adjusted)
+    stop = last_price - (float(atr.iloc[-1]) * 2.5)
+    return {"price": last_price, "atr": float(atr.iloc[-1]), "vol": float(vol.iloc[-1]), "stop": round(stop, 2)}
 
-# ── Ana Motor ──────────────────────────────────────────────────────────────
 def main():
-    # 1. Portföyü Sheets'ten çek
-    portfolio = get_portfolio_from_sheets()
-    stocks = list(portfolio.keys())
+    portfolio = get_portfolio()
+    if not portfolio: return
     
-    log.info(f"Portföy senkronize edildi: {stocks}")
-
-    # 2. Veri Çek ve Analiz Et
-    raw = yf.download(tickers=stocks, period="2y", group_by="ticker", progress=False)
+    raw = yf.download(tickers=list(portfolio.keys()), period="2y", group_by="ticker", progress=False)
     
-    target_data = []
-    for s in stocks:
+    analysis = []
+    total_value = 0
+    
+    for s, lot in portfolio.items():
         if s in raw.columns.get_level_values(0):
             tech = get_technical(raw[s].dropna(how="all"))
             if tech:
-                target_data.append({
-                    "code": s, 
-                    "lot": portfolio[s], 
-                    "price": tech["price"],
-                    "vol": tech["vol"]
-                })
+                val = tech["price"] * lot
+                analysis.append({"code": s, "lot": lot, "price": tech["price"], "val": val, "stop": tech["stop"], "vol": tech["vol"]})
+                total_value += val
 
-    # 3. Rapor Oluşturma
-    md = "# 🏦 Apex Terminal v26.0 (Live Sync)\n\n### 🎯 MEVCUT PORTFÖY DURUMU\n| Hisse | Mevcut Lot | Fiyat | Oynaklık (V) |\n| :--- | ---: | ---: | ---: |\n"
-    for t in target_data:
-        md += f"| **{t['code']}** | {t['lot']} | {t['price']:.2f} | {t['vol']:.2f} |\n"
+    # Rapor Oluşturma
+    md = "# 🏦 Apex Terminal v26.1\n\n| Hisse | Lot | Fiyat | Ağırlık | Stop Loss | V |\n| :--- | ---: | ---: | ---: | ---: | ---: |\n"
+    for t in analysis:
+        weight = (t["val"] / total_value) * 100
+        md += f"| **{t['code']}** | {t['lot']} | {t['price']:.2f} | %{weight:.1f} | {t['stop']:.2f} | {t['vol']:.2f} |\n"
 
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
