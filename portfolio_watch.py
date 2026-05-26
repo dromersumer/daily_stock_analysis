@@ -1,3 +1,10 @@
+Hisse	Lot
+VOO	0.30
+SCHD	8.00
+
+bu şekilde ABDPortfoy.csv dosyasını değiştirdim.
+
+portfolio_watch.py dosyasını da şu şekilde yaptım:
 # -*- coding: utf-8 -*-
 import os
 import io
@@ -7,72 +14,84 @@ import yfinance as yf
 import requests
 import sys
 
-# Log seviyesini DEBUG yapıyoruz ki her adımı görelim
-logging.basicConfig(level=logging.DEBUG, format="%(asctime)s [%(levelname)s] %(message)s")
+# Loglama seviyesini sadeleştirdik
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ApexTerminal")
 
+# Sheets URL
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
 
 def get_portfolio():
     try:
-        log.debug("Sheets URL'sine istek gönderiliyor...")
         response = requests.get(SHEET_URL)
         response.raise_for_status()
         
-        # İçeriği oku
-        df = pd.read_csv(io.StringIO(response.text), decimal=',')
-        log.debug(f"DataFrame sütunları: {df.columns.tolist()}")
+        # Dosyayı oku ve UTF-8 BOM karakterlerinden temizle
+        df = pd.read_csv(io.StringIO(response.content.decode('utf-8-sig')))
         
+        # Sütun isimlerini tam olarak sizin istediğiniz gibi eşleştiriyoruz
+        # Küçük harfe çevirip boşlukları alıyoruz
         df.columns = df.columns.str.strip().str.lower()
         
-        lot_col = next((col for col in df.columns if 'lot' in col or 'adet' in col), None)
-        hisse_col = next((col for col in df.columns if 'hisse' in col or 'ticker' in col or 'sembol' in col), None)
+        # SADECE 'hisse' ve 'lot' arıyoruz
+        hisse_col = 'hisse'
+        lot_col = 'lot'
         
-        log.debug(f"Tespit edilen: Hisse={hisse_col}, Lot={lot_col}")
-        
-        if not lot_col or not hisse_col:
-            log.error("Sütunlar eşleştirilemedi!")
+        if hisse_col not in df.columns or lot_col not in df.columns:
+            log.error(f"HATA: Sheets dosyasında 'Hisse' veya 'Lot' sütunu bulunamadı!")
+            log.error(f"Bulunan sütunlar: {df.columns.tolist()}")
             return {}
-            
-        # Veri temizleme
+
+        # Temizlik
         df = df.dropna(subset=[hisse_col])
         df[hisse_col] = df[hisse_col].astype(str).str.strip().str.upper()
-        df = df[~df[hisse_col].isin(['0', '0.0', 'NAN', ''])]
-        df[lot_col] = pd.to_numeric(df[lot_col], errors='coerce').fillna(0.0)
+        # Exchange prefix temizle: "NASDAQ:VOO" → "VOO"
+        df[hisse_col] = df[hisse_col].str.split(":").str[-1]
+        # Türkçe locale lot parse: "0,30" → 0.30
+        df[lot_col] = (
+            df[lot_col].astype(str)
+            .str.replace(",", ".", regex=False)
+            .pipe(pd.to_numeric, errors="coerce")
+            .fillna(0)
+        )
+        df = df[df[lot_col] > 0]
         
-        portfolio = dict(zip(df[hisse_col], df[lot_col]))
-        log.info(f"Portföy başarıyla oluşturuldu: {len(portfolio)} kalem.")
-        return portfolio
+        return dict(zip(df[hisse_col], df[lot_col]))
         
     except Exception as e:
-        log.error(f"HATA: {e}", exc_info=True)
+        log.error(f"KRİTİK HATA: {e}")
         return {}
 
 def main():
-    log.info("--- Apex Terminal Başlıyor ---")
     portfolio = get_portfolio()
-    
     if not portfolio:
-        log.error("Portföy boş! İşlem durduruluyor.")
+        log.error("Portföy boş döndü.")
         sys.exit(1)
         
-    log.info(f"İndirilecek hisseler: {list(portfolio.keys())}")
-    
-    raw = yf.download(list(portfolio.keys()), period="2y", group_by='ticker', auto_adjust=True, progress=False)
-    
-    md = "# 🏦 Apex Terminal Raporu\n\n| Hisse | Lot | Durum |\n| :--- | ---: | :--- |\n"
-    for s, lot in portfolio.items():
-        data = raw[s].dropna() if s in raw.columns.get_level_values(0) else None
-        if data is not None and not data.empty:
-            md += f"| **{s}** | {lot:.2f} | Veri Alındı |\n"
-        else:
-            md += f"| **{s}** | {lot:.2f} | ❌ Hata (Veri Yok) |\n"
-            log.warning(f"Hisse verisi alınamadı: {s}")
+    # Veri indirme
+    tickers = list(portfolio.keys())
+    raw = yf.download(tickers, period="1mo", auto_adjust=True, progress=False)
 
+    # Tek ticker edge case: MultiIndex'e normalize et
+    if len(tickers) == 1 and not isinstance(raw.columns, pd.MultiIndex):
+        raw.columns = pd.MultiIndex.from_product([raw.columns, tickers])
+
+    # Rapor
+    md = "# 🏦 Portföy Raporu\n\n| Hisse | Lot | Son Fiyat |\n| :--- | ---: | ---: |\n"
+    for s in tickers:
+        try:
+            close = raw[s]["Close"].dropna().iloc[-1]
+            price_str = f"${close:.2f}"
+        except Exception:
+            price_str = "—"
+            log.warning("Fiyat alınamadı: %s", s)
+        md += f"| {s} | {portfolio[s]:.2f} | {price_str} |\n"
+        
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
-        with open(summary_file, "w", encoding="utf-8") as f: f.write(md)
-    log.info("İşlem tamamlandı.")
+        with open(summary_file, "w", encoding="utf-8") as f:
+            f.write(md)
+    print(md)
 
 if __name__ == "__main__":
     main()
