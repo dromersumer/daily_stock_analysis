@@ -15,7 +15,11 @@ from data_provider.wolfram_provider import WolframValuationProvider
 
 # --- 1. PORTFÖY TİPİ VE DİNAMİK DEĞİŞKENLER ---
 PORTFOLIO_TYPE = os.getenv("PORTFOLIO_TYPE", "BIST").upper()
-START_CAPITAL = float(os.getenv("PORTFOLIO_CAPITAL", "100000"))
+
+# ABD için varsayılan sermaye 10.000, BIST için 100.000
+default_capital = "10000" if PORTFOLIO_TYPE == "ABD" else "100000"
+START_CAPITAL = float(os.getenv("PORTFOLIO_CAPITAL", default_capital))
+
 MAX_PORTFOLIO_SIZE = 19
 MAX_WEIGHT_PER_STOCK = 0.35
 LOOKBACK_DAYS = 252
@@ -25,13 +29,13 @@ CURRENCY = "$" if PORTFOLIO_TYPE == "ABD" else "₺"
 # --- GÜNCEL PORTFÖYLER (BIST 19 HİSSE / ABD 18 HİSSE) ---
 if PORTFOLIO_TYPE == "ABD":
     CURRENT_PORTFOLIO = {
-        "QQQM": 3,         "NVDA": 3.539,    "AVGO": 1.526, 
-        "SPUS": 9,         "INTC": 7,        "GOOG": 1.0063, 
-        "SCHD": 8,         "MU": 0.54,       "SMH": 0.257, 
-        "LITE": 0.125,    "CAT": 0.1,       "CHAT": 1, 
-        "PL": 2,          "NVTS": 6,        "NASA": 2, 
-        "XLE": 1,         "QQQI": 1,        "TSM": 0.1,
-        "CASH": 10000     # Dolar bazlı nakit (10.000 $)
+        "VOO": 0,          "SCHD": 8,         "QQQM": 3,
+        "SPUS": 9,         "VXUS": 0,         "O": 0,
+        "WPC": 0,          "SMH": 0.257,      "AIS": 0,
+        "NASA": 2,         "EUV": 0,          "CHAT": 1,
+        "NVDA": 3.539,     "AVGO": 1.526,     "GOOG": 1.0063,
+        "CAT": 0.1,        "LENZ": 0,         "ASPI": 0,
+        "CASH": 0          # Çifte sayımı önlemek için 0 yapıldı (START_CAPITAL zaten 10.000 $)
     }
 else:
     CURRENT_PORTFOLIO = {
@@ -41,7 +45,7 @@ else:
         "KATMR.IS": 1000,  "KCHOL.IS": 6,     "KONTR.IS": 115,
         "MIATK.IS": 27,    "ODINE.IS": 1,     "OTKAR.IS": 3,
         "RALYH.IS": 12.28, "SISE.IS": 36,     "THYAO.IS": 2,
-        "TUPRS.IS": 10,    "CASH": 100000     # TL bazlı nakit (100.000 ₺)
+        "TUPRS.IS": 10,    "CASH": 100000     # TL bazlı nakit
     }
 
 def safe_float(x, d=0.0):
@@ -86,10 +90,12 @@ def get_ai_comments(orders):
         hisse_kodu = o['code'].replace(".IS", "")
         wolfram_notu = wolfram.get_stock_valuation(hisse_kodu) or ""
 
+        # GİTHUB ACTIONS LOGLARI İÇİN HATA AYIKLAMA (DEBUG)
+        print(f"[WOLFRAM DEBUG] {hisse_kodu} Yanıtı: {wolfram_notu}")
+
         if "Veri bulunamadı" in wolfram_notu or "Hata" in wolfram_notu or not wolfram_notu:
             wolfram_ozet = "Analiz Bekleniyor"
         else:
-            # Wolfram çıktısının ilk satırını özet olarak al
             wolfram_ozet = wolfram_notu.split('\n')[0][:50]
 
         if USE_AI and google_genai is not None:
@@ -124,14 +130,14 @@ def apply_weight_cap_and_renormalize(weights, cap=MAX_WEIGHT_PER_STOCK):
 def main():
     # Varsayılan listeler (Environment Variables yoksa kullanılır)
     if PORTFOLIO_TYPE == "ABD":
-        default_list = "QQQM,NVDA,AVGO,SPUS,INTC,GOOG,SCHD,MU,SMH,LITE,CAT,CHAT,PL,NVTS,NASA,XLE,QQQI,TSM"
+        default_list = "VOO,SCHD,QQQM,SPUS,VXUS,O,WPC,SMH,AIS,NASA,EUV,CHAT,NVDA,AVGO,GOOG,CAT,LENZ,ASPI"
     else:
         default_list = "AKSEN.IS,ALTNY.IS,ASELS.IS,ASTOR.IS,BIMAS.IS,EREGL.IS,FROTO.IS,ISDMR.IS,ISMEN.IS,KATMR.IS,KCHOL.IS,KONTR.IS,MIATK.IS,ODINE.IS,OTKAR.IS,RALYH.IS,SISE.IS,THYAO.IS,TUPRS.IS"
     
     stock_input = os.getenv("STOCK_LIST", default_list)
     stocks = [s.strip().upper() for s in stock_input.split(",") if s.strip() and s.strip().upper() != "CASH"]
 
-    # Veri indirme (Hata vermemesi için threads parametresi kaldırıldı)
+    # Veri indirme
     data = yf.download(tickers=" ".join(stocks), period="2y", group_by="ticker")
     if data is None or data.empty: return
 
@@ -143,7 +149,6 @@ def main():
                 else: continue
             else: df = data.copy()
 
-            # Yetersiz veri logu
             if df.empty or len(df) < 200:
                 print(f"[UYARI] {s}: Yetersiz veri ({len(df)} gün), analiz dışı bırakıldı.")
                 continue
@@ -161,7 +166,6 @@ def main():
     selected = sorted(scores, key=scores.get, reverse=True)[:MAX_PORTFOLIO_SIZE]
     if not selected: return
 
-    # Risk paritesi bazlı ağırlıklandırma
     all_vols = [techs[s]['vol'] for s in techs if techs[s]['vol'] > 0]
     MIN_VOL = max(np.percentile(all_vols, 25) if len(all_vols) >= 4 else 0.05, 0.05)
     inv = {s: 1 / max(techs[s]['vol'], MIN_VOL) for s in selected}
@@ -170,7 +174,6 @@ def main():
 
     weights = apply_weight_cap_and_renormalize(raw_weights)
 
-    # Etkin sermaye hesabı (CASH dahil)
     available_cash = CURRENT_PORTFOLIO.get("CASH", 0)
     effective_capital = START_CAPITAL + available_cash
 
