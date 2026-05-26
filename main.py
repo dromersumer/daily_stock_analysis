@@ -38,10 +38,6 @@ else:
         "SISE.IS": 36, "THYAO.IS": 2, "TUPRS.IS": 10, "CASH": 100000
     }
 
-def safe_float(x, d=0.0):
-    try: return float(x)
-    except: return d
-
 def safe_round(x, n=2):
     try: return round(float(x), n) if pd.notna(x) else 0
     except: return 0
@@ -53,9 +49,8 @@ def get_technical(df):
     df['atr'] = tr.rolling(14).mean().dropna()
     df['vol'] = close.pct_change().rolling(20).std() * np.sqrt(LOOKBACK_DAYS)
     last = df.iloc[-1]
-    mom_60 = safe_float(close.pct_change(60).iloc[-1]) if len(close) > 60 else 0
-    regime = "TREND" if last['Close'] > last['ema200'] and safe_float(close.pct_change(20).iloc[-1]) > 0 else "WEAK"
-    return {"price": safe_round(last['Close']), "atr": safe_round(last['atr']), "vol": safe_float(last['vol']), "mom_60": mom_60, "regime": regime}
+    regime = "TREND" if last['Close'] > last['ema200'] and safe_round(close.pct_change(20).iloc[-1], 4) > 0 else "WEAK"
+    return {"price": safe_round(last['Close']), "atr": safe_round(last['atr']), "vol": float(last['vol']), "regime": regime}
 
 def get_ai_comments(orders, techs):
     comments = {}
@@ -71,10 +66,9 @@ def get_ai_comments(orders, techs):
         t = techs.get(code, {})
         if client and t:
             try:
-                res = client.models.generate_content(model="gemini-1.5-flash", contents=f"'{code}' için teknik yorum: Fiyat {t.get('price')}, {t.get('regime')}. Max 10 kelime.")
+                res = client.models.generate_content(model="gemini-1.5-flash", contents=f"'{code}' teknik: Fiyat {t.get('price')}, {t.get('regime')}. Max 10 kelime yorum.")
                 comments[code] = f"🤖 {res.text.strip().replace(chr(10), ' ')[:50]}"
-            except Exception as e:
-                comments[code] = f"⚙️ Teknik: {t.get('regime', 'N/A')} (Vol:{t.get('vol',0):.2f})"
+            except: comments[code] = f"⚙️ Teknik: {t.get('regime', 'N/A')} (V:{t.get('vol',0):.2f})"
         else:
             comments[code] = f"⚙️ Teknik: {t.get('regime', 'N/A')}"
     return comments
@@ -92,28 +86,43 @@ def main():
         if len(df) < 200: continue
         t = get_technical(df)
         techs[s] = t
-        scores[s] = (40 if t['regime'] == "TREND" else 0) + (max(1 - t['vol'], 0) * 30) + (min(max(t['mom_60'] / 0.5, 0), 1) * 30)
-
+        scores[s] = (40 if t['regime'] == "TREND" else 0) + (max(1 - t['vol'], 0) * 30)
+    
     selected = sorted(scores, key=scores.get, reverse=True)[:MAX_PORTFOLIO_SIZE]
-    inv = {s: 1 / max(techs[s]['vol'], 0.05) for s in selected}
-    total_inv = sum(inv.values())
-    weights = {s: inv[s] / total_inv for s in selected}
-
+    weights = {s: 1/len(selected) for s in selected}
+    
     available_cash = CURRENT_PORTFOLIO.get("CASH", 0)
     effective_capital = START_CAPITAL + available_cash
-    target = [{"code": s, "lot": math.floor((effective_capital * weights[s]) / techs[s]['price']), "weight": weights[s], "price": techs[s]['price']} for s in selected]
+    target = []
+    for s in selected:
+        price = techs[s]['price']
+        vol = techs[s]['vol']
+        # Dinamik Stop-Loss: Volatilite arttıkça stop mesafesini genişlet
+        stop_val = safe_round(price - (techs[s]['atr'] * (2.0 + (vol * 2.0))))
+        target.append({"code": s, "lot": math.floor((effective_capital * weights[s]) / price), "price": price, "stop": stop_val})
 
     orders = []
     for t in target:
         curr = CURRENT_PORTFOLIO.get(t['code'], 0)
         if t['lot'] > curr: orders.append({"type": "BUY", "code": t['code'], "lot": round(t['lot'] - curr, 4)})
-    for c, l in CURRENT_PORTFOLIO.items():
-        if c != "CASH" and l > 0 and not any(t['code'] == c for t in target): orders.append({"type": "SELL", "code": c, "lot": l})
-
+    
     ai_comments = get_ai_comments(orders, techs)
     md = f"## 🏦 Apex Terminal v25.3 ({PORTFOLIO_TYPE})\n| İşlem | Hisse | Adet | Analiz |\n| :--- | :--- | :--- | :--- |\n"
     for o in orders:
         md += f"| {'🟩 AL' if o['type'] == 'BUY' else '🟥 SAT'} | **{o['code']}** | {o['lot']} | {ai_comments.get(o['code'], '---')} |\n"
+    
+    md += "\n\n### 🎯 HEDEF PORTFÖY VE DİNAMİK STOP\n| Hisse | Lot | Fiyat | Dinamik Stop |\n| :--- | :--- | :--- | :--- |\n"
+    for t in target:
+        md += f"| **{t['code']}** | {t['lot']} | {t['price']} | {t['stop']} |\n"
+
+    md += """
+### 📝 Terimler Sözlüğü
+* **ATR (Average True Range):** Hissenin son dönemdeki ortalama oynaklık aralığı. Stop-loss seviyesini belirlerken fiyatın doğal dalgalanmalarından etkilenmemek için kullanılır.
+* **Vol (Volatilite):** Hissenin fiyatındaki istatistiksel oynaklık (yıllık standart sapma). Yüksek olması yüksek risk/hareketlilik gösterir.
+* **Dinamik Stop:** ATR'nin volatilite ile ölçeklenmiş hali. Hisse ne kadar oynaksa stop mesafesi o kadar geniş, stabilse o kadar dardır.
+* **TREND:** Fiyatın 200 günlük ortalamanın üzerinde olduğu ve güçlü momentum sergilediği yükseliş evresi.
+* **WEAK:** Teknik göstergelerin zayıf sinyaller verdiği veya düşüş eğilimindeki evre.
+"""
     
     summary = os.getenv("GITHUB_STEP_SUMMARY")
     if summary:
