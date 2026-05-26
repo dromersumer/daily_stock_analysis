@@ -1,7 +1,5 @@
-yfinance
-pandas
-numpy
-google-genai
-wolframalpha
-fake-useragent
-python-dotenv
+yfinance>=0.2.40
+pandas>=2.0.0
+numpy>=1.26.0
+google-genai>=1.0.0
+python-dotenv>=1.0.0
