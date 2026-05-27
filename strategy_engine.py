@@ -10,7 +10,14 @@ import yfinance as yf
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("StrategyEngine")
 
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
+# SHEET_URL önce env'den okunur; fallback olarak hardcoded URL kullanılır.
+# GitHub Secret'ta SHEET_URL tanımlanırsa hardcoded değer devre dışı kalır.
+_SHEET_URL_FALLBACK = (
+    "https://docs.google.com/spreadsheets/d/"
+    "1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
+)
+SHEET_URL = os.getenv("SHEET_URL", _SHEET_URL_FALLBACK)
+
 PERIOD = "2y"
 ATR_WINDOW = 14
 
@@ -24,9 +31,27 @@ MIN_DAYS = {
 }
 
 
+# Bilinen geçersiz / yfinance'ta veri döndürmeyen ticker'lar.
+# Portföyde bulunursa yf.download'a gönderilmez, raporda ⚠️ olarak işaretlenir.
+KNOWN_INVALID_TICKERS: set[str] = set(
+    os.getenv("KNOWN_INVALID_TICKERS", "").upper().split(",")
+) - {""}   # boş string'i temizle
+
+
 def get_portfolio() -> dict:
+    """
+    Google Sheets'ten portföyü çeker.
+    Hata durumunda boş dict döndürür ve sebebini loglar.
+    """
+    url = SHEET_URL
+    if not url:
+        log.error(
+            "SHEET_URL tanımlı değil. "
+            "GitHub Secret olarak ekleyin veya kodu düzenleyin."
+        )
+        return {}
     try:
-        response = requests.get(SHEET_URL, timeout=15)
+        response = requests.get(url, timeout=15)
         response.raise_for_status()
         df = pd.read_csv(io.StringIO(response.content.decode("utf-8-sig")))
         df.columns = df.columns.str.strip().str.lower()
@@ -38,6 +63,12 @@ def get_portfolio() -> dict:
         )
         df = df[df["lot"] > 0]
         return dict(zip(df["hisse"], df["lot"]))
+    except requests.exceptions.Timeout:
+        log.error("Portföy yüklenemedi: Google Sheets bağlantısı zaman aşımına uğradı (15s).")
+        return {}
+    except requests.exceptions.HTTPError as e:
+        log.error(f"Portföy yüklenemedi: HTTP {e.response.status_code} — Sheet gizli veya URL yanlış olabilir.")
+        return {}
     except Exception as e:
         log.error(f"Portföy yüklenemedi: {e}")
         return {}
@@ -150,6 +181,18 @@ def _fmt(val, fmt=".1f", suffix="", prefix="") -> str:
 # Volatilite eşiği: yıllık %30'un altı "düşük" kabul edilir
 VOL_LOW_THRESHOLD = float(os.getenv("VOL_LOW_THRESHOLD", "30.0"))
 
+# Sabit hedef ağırlıklar — burada tanımlanmayan ticker için sütun boş kalır
+TARGET_WEIGHTS: dict[str, float] = {
+    "VOO":  15.0,
+    "SCHD": 10.0,
+    "QQQM": 10.0,
+    "VXUS": 15.0,
+    "O":    15.0,
+    "SMH":   7.5,
+    "AIS":   7.5,
+    "NASA":  7.5,
+}
+
 
 def compute_action(r: dict) -> str:
     """
@@ -206,12 +249,16 @@ def compute_action(r: dict) -> str:
 
 def build_report(results: list) -> str:
     md = "# 📊 Strateji Motoru Raporu\n\n"
-    md += "| Hisse | Fiyat | Veri (gün) | EMA-200 | Trend | Yıllık Vol% | ATR% | RSI | RSI Sinyali | Mom 1M% | **Aksiyon** |\n"
-    md += "| :--- | ---: | ---: | ---: | :--- | ---: | ---: | ---: | :--- | ---: | :---: |\n"
+    md += "| Hisse | Fiyat | Veri (gün) | EMA-200 | Trend | Yıllık Vol% | ATR% | RSI | RSI Sinyali | Mom 1M% | Hedef Ağırlık% | **Aksiyon** |\n"
+    md += "| :--- | ---: | ---: | ---: | :--- | ---: | ---: | ---: | :--- | ---: | ---: | :---: |\n"
 
     for r in results:
+        ticker = r.get("ticker", "?")
+        target_w = TARGET_WEIGHTS.get(ticker)
+        target_w_str = f"%{target_w:.1f}" if target_w is not None else "—"
+
         if "error" in r:
-            md += f"| **{r['ticker']}** | — | — | — | ⚠️ {r['error']} | — | — | — | — | — | — |\n"
+            md += f"| **{ticker}** | — | — | — | ⚠️ {r['error']} | — | — | — | — | — | {target_w_str} | — |\n"
             continue
 
         trend_str = r["trend"]
@@ -225,7 +272,7 @@ def build_report(results: list) -> str:
         action = compute_action(r)
 
         md += (
-            f"| **{r['ticker']}** "
+            f"| **{ticker}** "
             f"| ${r['last_price']} "
             f"| {r['days_available']} "
             f"| {_fmt(r['ema200'], '.2f', prefix='$')} "
@@ -235,6 +282,7 @@ def build_report(results: list) -> str:
             f"| {_fmt(r['rsi'], '.1f')} "
             f"| {r.get('rsi_signal', '—')} "
             f"| {_fmt(r['momentum_1m_pct'], '+.1f', '%')} "
+            f"| {target_w_str} "
             f"| **{action}** |\n"
         )
 
@@ -273,28 +321,75 @@ def build_report(results: list) -> str:
     return md
 
 
+def _resolve_ticker_level(raw: pd.DataFrame, tickers: list) -> int:
+    """
+    yfinance MultiIndex formatı versiyona göre değişir:
+      - Yeni (0.2.x): (Price, Ticker)  → ticker level=1
+      - Eski         : (Ticker, Price)  → ticker level=0
+    İlk ticker'ın hangi seviyede bulunduğunu kontrol ederek doğru level'ı döndürür.
+    """
+    if not isinstance(raw.columns, pd.MultiIndex):
+        return -1  # tek ticker, MultiIndex yok
+    sample = tickers[0]
+    if sample in raw.columns.get_level_values(1):
+        return 1
+    if sample in raw.columns.get_level_values(0):
+        return 0
+    # Hiçbirinde bulunamazsa varsayılan olarak 1 dene
+    log.warning("MultiIndex level tespit edilemedi, level=1 deneniyor.")
+    return 1
+
+
 def main():
     portfolio = get_portfolio()
     if not portfolio:
-        log.error("Portföy boş.")
+        log.error(
+            "Portföy boş — olası nedenler:\n"
+            "  • SHEET_URL tanımlı değil veya yanlış\n"
+            "  • Google Sheets erişime kapalı (gizlilik ayarı)\n"
+            "  • Tabloda 'hisse' / 'lot' sütunu yok ya da tüm lot değerleri 0"
+        )
         return
 
-    tickers = list(portfolio.keys())
+    all_tickers = list(portfolio.keys())
+
+    # ── Geçersiz ticker'ları ayır, yf.download'a gönderme ──────────────────
+    invalid_pre = [t for t in all_tickers if t in KNOWN_INVALID_TICKERS]
+    tickers     = [t for t in all_tickers if t not in KNOWN_INVALID_TICKERS]
+
+    if invalid_pre:
+        log.warning(f"Geçersiz/atlanan ticker'lar (KNOWN_INVALID_TICKERS): {invalid_pre}")
+
+    if not tickers:
+        log.error("Geçerli ticker kalmadı.")
+        return
+
     log.info(f"Analiz edilecek: {tickers}")
 
     raw = yf.download(tickers, period=PERIOD, auto_adjust=True, progress=False)
 
-    # Tek ticker edge case
+    # ── Tek ticker edge case ────────────────────────────────────────────────
     if len(tickers) == 1 and not isinstance(raw.columns, pd.MultiIndex):
         raw = pd.concat({tickers[0]: raw}, axis=1).swaplevel(axis=1)
 
+    # ── MultiIndex level tespiti (versiyon bağımsız) ────────────────────────
+    ticker_level = _resolve_ticker_level(raw, tickers)
+
     results = []
-    missing = []
+    missing = list(invalid_pre)  # geçersiz ticker'lar zaten eksik
+
+    # Geçersiz ticker'ları da rapora ekle
+    for t in invalid_pre:
+        results.append({"ticker": t, "error": "geçersiz_ticker"})
+
     for t in tickers:
         try:
-            ticker_df = raw.xs(t, axis=1, level=1) if isinstance(raw.columns, pd.MultiIndex) else raw
+            if ticker_level >= 0:
+                ticker_df = raw.xs(t, axis=1, level=ticker_level)
+            else:
+                ticker_df = raw
             if ticker_df["Close"].dropna().empty:
-                log.warning(f"{t}: yfinance veri döndürmedi (delist?).")
+                log.warning(f"{t}: yfinance veri döndürmedi (delist veya geçersiz sembol?).")
                 missing.append(t)
                 results.append({"ticker": t, "error": "veri_yok"})
                 continue
