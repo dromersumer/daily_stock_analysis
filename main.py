@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v33.2 (Kişiselleştirilmiş Başlıklar & Auto-Exit)
+# main.py — Apex Terminal v34.0 (Ömer & Özlem Çift Portföy Optimizasyonu)
 import io, logging, os, requests, sys, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ApexTerminal")
 
 # ── Ayarlar ───────────────────────────────────────────────────────────────────
-SHEET_URL = os.getenv("SHEET_URL") or "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
+SHEET_URL_OMER  = os.getenv("SHEET_URL") or "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
+SHEET_URL_OZLEM = os.getenv("SHEET_URL_OZLEM") or "https://docs.google.com/spreadsheets/d/1GGC4p2q9DTDfkF6HQlEINE0Nqk7JVoqpoui2z_L98b8/export?format=csv"
+
 PERIOD, ATR_WINDOW, ATR_MULTIPLIER = "2y", 14, 3.0  # Halka arz volatilitesi için 3.0 koruması aktif
 TARGET_WEIGHTS = {
     "VOO": 15.0, "SCHD": 10.0, "QQQM": 5.0, "SPUS": 5.0, 
@@ -14,9 +16,9 @@ TARGET_WEIGHTS = {
     "AIS": 7.5, "NASA": 7.5
 }
 
-def get_portfolio() -> dict:
+def get_portfolio(url: str) -> dict:
     try:
-        r = requests.get(SHEET_URL, timeout=15)
+        r = requests.get(url, timeout=15)
         r.raise_for_status()
         df = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")))
         df.columns = df.columns.str.strip().str.lower()
@@ -25,7 +27,7 @@ def get_portfolio() -> dict:
         df["lot"]   = df["lot"].astype(str).str.replace(",", ".", regex=False).pipe(pd.to_numeric, errors="coerce").fillna(0)
         return dict(zip(df["hisse"], df[df["lot"] > 0]["lot"]))
     except Exception as e:
-        log.error(f"Portföy yüklenemedi: {e}")
+        log.error(f"Portföy yüklenemedi ({url}): {e}")
         return {}
 
 def analyze_ticker(ticker: str, df: pd.DataFrame) -> dict:
@@ -33,11 +35,9 @@ def analyze_ticker(ticker: str, df: pd.DataFrame) -> dict:
     n = len(close)
     if n < 30: return {"ticker": ticker, "error": "veri_yetersiz"}
     
-    # Fiyat Verileri (Önceki Kapanış ve Son Fiyat)
     prev_close = float(close.iloc[-2])
     last_p     = float(close.iloc[-1])
     
-    # Yüzdesel Değişim ve Emoji Belirleme
     pct_change = ((last_p - prev_close) / prev_close) * 100
     if pct_change > 0:
         change_str = f"🟢 %+{pct_change:.2f}"
@@ -76,42 +76,69 @@ def compute_action(r: dict) -> str:
     if e200 and p < e50 < e200 and 40 <= rsi <= 50: return "🔴 SAT"
     return "⚪ NÖTR"
 
-def build_report(portfolio: dict, results: list) -> str:
-    price_map = {r["ticker"]: r.get("last_price", 0.0) for r in results if "error" not in r}
+def build_user_report(user_name: str, portfolio: dict, global_results: dict) -> str:
+    price_map = {t: r.get("last_price", 0.0) for t, r in global_results.items() if "error" not in r}
     total_val = sum(lots * price_map.get(t, 0) for t, lots in portfolio.items()) or 1.0
     
-    # Başlık "Portföy Dağılımı-Ömer" olarak güncellendi
-    md = "# 🚀 Apex Terminal Raporu (High-Vol Mode)\n\n## 💼 Portföy Dağılımı-Ömer\n| Hisse | Lot | Değer ($) | Mevcut % | Hedef % |\n| :--- | ---: | ---: | ---: | ---: |\n"
+    md = f"## 💼 Portföy Dağılımı - {user_name}\n| Hisse | Lot | Değer ($) | Mevcut % | Hedef % |\n| :--- | ---: | ---: | ---: | ---: |\n"
     for t, lots in portfolio.items():
         val = lots * price_map.get(t, 0)
         md += f"| **{t}** | {lots} | ${val:,.2f} | %{(val/total_val*100):.1f} | {'%'+str(TARGET_WEIGHTS.get(t)) if TARGET_WEIGHTS.get(t) else '—'} |\n"
     
-    # Başlık "Teknik Analiz & Stop Loss - Ömer" olarak güncellendi
-    md += f"\n> 💰 **Toplam:** ${total_val:,.2f} | 🛡️ **ATR Çarpanı:** {ATR_MULTIPLIER}x\n\n## 📈 Teknik Analiz & Stop Loss - Ömer\n| Hisse | Önceki Kapanış Fiyat | Son Fiyat | Fiyat Artış/Azalış% | Stop Loss | Trend | RSI | Aksiyon |\n| :--- | ---: | ---: | :---: | ---: | :--- | ---: | ---: |\n"
-    for r in results:
-        t = r.get("ticker", "?")
-        if "error" in r: md += f"| **{t}** | — | — | — | — | — | — | ⚠️ {r['error']} |\n"; continue
+    md += f"\n> 💰 **{user_name} Toplam Portföy:** ${total_val:,.2f}\n\n"
+    md += f"### 📈 Teknik Analiz & Stop Loss - {user_name}\n| Hisse | Önceki Kapanış Fiyat | Son Fiyat | Fiyat Artış/Azalış% | Stop Loss | Trend | RSI | Aksiyon |\n| :--- | ---: | ---: | :---: | ---: | :--- | ---: | ---: |\n"
+    
+    for t in portfolio.keys():
+        r = global_results.get(t, {})
+        if not r or "error" in r:
+            err_msg = r.get("error", "veri_yok") if r else "veri_yok"
+            md += f"| **{t}** | — | — | — | — | — | — | ⚠️ {err_msg} |\n"
+            continue
         stop_alert = "🚨" if r['last_price'] < (r['stop_loss'] * 1.03) else ""
         md += f"| **{t}** | ${r['prev_close']:.2f} | ${r['last_price']:.2f} | {r['change_str']} | ${r['stop_loss']} {stop_alert} | {r.get('trend_state', 'N/A')} | {r.get('rsi', '—')} | **{compute_action(r)}** |\n"
+    
     return md
 
 def main():
-    portfolio = get_portfolio()
-    if not portfolio: 
+    # 1. Portföyleri yükle
+    p_omer = get_portfolio(SHEET_URL_OMER)
+    p_ozlem = get_portfolio(SHEET_URL_OZLEM)
+    
+    if not p_omer and not p_ozlem:
+        log.error("Her iki portföy de boş veya yüklenemedi.")
         sys.exit(0)
+        
+    # 2. Benzersiz hisseleri birleştir (MÜKERRER SORGULAMAYI ENGELLER)
+    all_tickers = list(set(list(p_omer.keys()) + list(p_ozlem.keys())))
     
-    tickers = list(portfolio.keys())
-    raw = yf.download(tickers, period=PERIOD, auto_adjust=True, progress=False)
+    # 3. Yahoo Finance üzerinden TEK SEFERDE toplu veri çek
+    raw = yf.download(all_tickers, period=PERIOD, auto_adjust=True, progress=False)
+    level = 1 if isinstance(raw.columns, pd.MultiIndex) and all_tickers[0] in raw.columns.get_level_values(1) else (0 if isinstance(raw.columns, pd.MultiIndex) else -1)
     
-    level = 1 if isinstance(raw.columns, pd.MultiIndex) and tickers[0] in raw.columns.get_level_values(1) else (0 if isinstance(raw.columns, pd.MultiIndex) else -1)
-    results = [analyze_ticker(t, raw.xs(t, axis=1, level=level) if level >= 0 else raw) for t in tickers]
+    # 4. Tüm hisseleri analiz edip ortak bir havuzda sakla
+    global_results = {}
+    for t in all_tickers:
+        try:
+            df = raw.xs(t, axis=1, level=level) if level >= 0 else raw
+            global_results[t] = analyze_ticker(t, df)
+        except Exception as e:
+            global_results[t] = {"ticker": t, "error": str(e)}
+            
+    # 5. Ayrı ayrı raporları oluştur ve birleştir
+    final_md = "# 🚀 Apex Terminal Ortak Rapor Paneli\n"
+    final_md += f"> 🛡️ **Sistem Parametresi (Mevcut Risk):** {ATR_MULTIPLIER}x ATR Stop\n\n---\n\n"
     
-    md = build_report(portfolio, results)
+    if p_omer:
+        final_md += build_user_report("Ömer", p_omer, global_results) + "\n\n---\n\n"
+    if p_ozlem:
+        final_md += build_user_report("Özlem", p_ozlem, global_results)
+        
+    # 6. Çıktıyı bas ve kaydet
     if os.getenv("GITHUB_STEP_SUMMARY"):
-        with open(os.getenv("GITHUB_STEP_SUMMARY"), "w", encoding="utf-8") as f: f.write(md)
-    print(md)
+        with open(os.getenv("GITHUB_STEP_SUMMARY"), "w", encoding="utf-8") as f: f.write(final_md)
+    print(final_md)
     
     sys.exit(0)
 
-if __name__ == "__main__": 
+if __name__ == "__main__":
     main()
