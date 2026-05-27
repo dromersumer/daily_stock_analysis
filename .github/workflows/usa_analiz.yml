@@ -30,5 +30,6 @@ jobs:
       - name: Run Apex Terminal
         env:
           SHEET_URL: ${{ secrets.SHEET_URL }}
+          SHEET_URL_OZLEM: ${{ secrets.SHEET_URL_OZLEM }}
           VOL_LOW_THRESHOLD: "30.0"
         run: python main.py
