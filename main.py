@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v33.1 (Seans Takip Paneli & Auto-Exit Entegreli)
+# main.py — Apex Terminal v33.2 (Kişiselleştirilmiş Başlıklar & Auto-Exit)
 import io, logging, os, requests, sys, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -80,12 +80,14 @@ def build_report(portfolio: dict, results: list) -> str:
     price_map = {r["ticker"]: r.get("last_price", 0.0) for r in results if "error" not in r}
     total_val = sum(lots * price_map.get(t, 0) for t, lots in portfolio.items()) or 1.0
     
-    md = "# 🚀 Apex Terminal Raporu (High-Vol Mode)\n\n## 💼 Portföy Dağılımı\n| Hisse | Lot | Değer ($) | Mevcut % | Hedef % |\n| :--- | ---: | ---: | ---: | ---: |\n"
+    # Başlık "Portföy Dağılımı-Ömer" olarak güncellendi
+    md = "# 🚀 Apex Terminal Raporu (High-Vol Mode)\n\n## 💼 Portföy Dağılımı-Ömer\n| Hisse | Lot | Değer ($) | Mevcut % | Hedef % |\n| :--- | ---: | ---: | ---: | ---: |\n"
     for t, lots in portfolio.items():
         val = lots * price_map.get(t, 0)
         md += f"| **{t}** | {lots} | ${val:,.2f} | %{(val/total_val*100):.1f} | {'%'+str(TARGET_WEIGHTS.get(t)) if TARGET_WEIGHTS.get(t) else '—'} |\n"
     
-    md += f"\n> 💰 **Toplam:** ${total_val:,.2f} | 🛡️ **ATR Çarpanı:** {ATR_MULTIPLIER}x\n\n## 📈 Teknik Analiz & Stop Loss\n| Hisse | Önceki Kapanış Fiyat | Son Fiyat | Fiyat Artış/Azalış% | Stop Loss | Trend | RSI | Aksiyon |\n| :--- | ---: | ---: | :---: | ---: | :--- | ---: | ---: |\n"
+    # Başlık "Teknik Analiz & Stop Loss - Ömer" olarak güncellendi
+    md += f"\n> 💰 **Toplam:** ${total_val:,.2f} | 🛡️ **ATR Çarpanı:** {ATR_MULTIPLIER}x\n\n## 📈 Teknik Analiz & Stop Loss - Ömer\n| Hisse | Önceki Kapanış Fiyat | Son Fiyat | Fiyat Artış/Azalış% | Stop Loss | Trend | RSI | Aksiyon |\n| :--- | ---: | ---: | :---: | ---: | :--- | ---: | ---: |\n"
     for r in results:
         t = r.get("ticker", "?")
         if "error" in r: md += f"| **{t}** | — | — | — | — | — | — | ⚠️ {r['error']} |\n"; continue
@@ -109,7 +111,6 @@ def main():
         with open(os.getenv("GITHUB_STEP_SUMMARY"), "w", encoding="utf-8") as f: f.write(md)
     print(md)
     
-    # Sürecin kendi kendine durmasını ve askıda kalmamasını garanti ediyoruz
     sys.exit(0)
 
 if __name__ == "__main__": 
