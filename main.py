@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v27.5
+# main.py — Apex Terminal v27.6 (Crash-Proof Edition)
 import io, logging, os, requests, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ApexTerminal")
 
-SHEET_URL         = os.getenv("SHEET_URL", "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv")
+# ── Eşik ve Ayarlar (Boş string korumalı) ──────────────────────────────────────
+SHEET_URL         = os.getenv("SHEET_URL") or "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
 PERIOD            = "2y"
 ATR_WINDOW        = 14
-VOL_LOW_THRESHOLD = float(os.getenv("VOL_LOW_THRESHOLD", "30.0"))
+VOL_LOW_THRESHOLD = float(os.getenv("VOL_LOW_THRESHOLD") or "30.0")
 TARGET_WEIGHTS    = {"VOO": 15.0, "SCHD": 10.0, "QQQM": 10.0, "VXUS": 15.0, "O": 15.0, "SMH": 7.5, "AIS": 7.5, "NASA": 7.5}
 
 
