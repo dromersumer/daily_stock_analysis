@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v31.2 (Final - Full Revision)
+# main.py — Apex Terminal v33.0 (Seans Takip ve Gün İçi Performans Paneli)
 import io, logging, os, requests, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -7,7 +7,7 @@ log = logging.getLogger("ApexTerminal")
 
 # ── Ayarlar ───────────────────────────────────────────────────────────────────
 SHEET_URL = os.getenv("SHEET_URL") or "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
-PERIOD, ATR_WINDOW, ATR_MULTIPLIER = "2y", 14, 2.5
+PERIOD, ATR_WINDOW, ATR_MULTIPLIER = "2y", 14, 3.0  # Halka arz volatilitesi için 3.0 koruması aktif
 TARGET_WEIGHTS = {
     "VOO": 15.0, "SCHD": 10.0, "QQQM": 5.0, "SPUS": 5.0, 
     "VXUS": 15.0, "O": 7.5, "WPC": 7.5, "SMH": 7.5, 
@@ -33,7 +33,19 @@ def analyze_ticker(ticker: str, df: pd.DataFrame) -> dict:
     n = len(close)
     if n < 30: return {"ticker": ticker, "error": "veri_yetersiz"}
     
-    last_p = float(close.iloc[-1])
+    # Fiyat Verileri (Önceki Kapanış ve Son Fiyat)
+    prev_close = float(close.iloc[-2])
+    last_p     = float(close.iloc[-1])
+    
+    # Yüzdesel Değişim ve Emoji Belirleme
+    pct_change = ((last_p - prev_close) / prev_close) * 100
+    if pct_change > 0:
+        change_str = f"🟢 %+{pct_change:.2f}"
+    elif pct_change < 0:
+        change_str = f"🔴 %{pct_change:.2f}"
+    else:
+        change_str = f"⚫ %0.00"
+        
     ema50  = close.ewm(span=50, adjust=False).mean().iloc[-1]
     ema200 = close.ewm(span=200, adjust=False).mean().iloc[-1] if n >= 200 else None
     
@@ -46,7 +58,11 @@ def analyze_ticker(ticker: str, df: pd.DataFrame) -> dict:
     rsi = round(float((100 - (100 / (1 + gain / loss.replace(0, np.nan)))).iloc[-1]), 2)
     
     return {
-        "ticker": ticker, "last_price": round(last_p, 2), "rsi": rsi,
+        "ticker": ticker, 
+        "prev_close": round(prev_close, 2),
+        "last_price": round(last_p, 2), 
+        "change_str": change_str,
+        "rsi": rsi,
         "ema50": round(ema50, 2), "ema200": round(ema200, 2) if ema200 else None,
         "stop_loss": round(last_p - (ATR_MULTIPLIER * atr), 2),
         "trend_state": "BULL" if ema200 and last_p > ema50 > ema200 else ("BEAR" if ema200 and last_p < ema50 < ema200 else "NEUTRAL")
@@ -64,17 +80,17 @@ def build_report(portfolio: dict, results: list) -> str:
     price_map = {r["ticker"]: r.get("last_price", 0.0) for r in results if "error" not in r}
     total_val = sum(lots * price_map.get(t, 0) for t, lots in portfolio.items()) or 1.0
     
-    md = "# 🚀 Apex Terminal Raporu (Savaş Modu v2.5)\n\n## 💼 Portföy Dağılımı\n| Hisse | Lot | Değer ($) | Mevcut % | Hedef % |\n| :--- | ---: | ---: | ---: | ---: |\n"
+    md = "# 🚀 Apex Terminal Raporu (High-Vol Mode)\n\n## 💼 Portföy Dağılımı\n| Hisse | Lot | Değer ($) | Mevcut % | Hedef % |\n| :--- | ---: | ---: | ---: | ---: |\n"
     for t, lots in portfolio.items():
         val = lots * price_map.get(t, 0)
         md += f"| **{t}** | {lots} | ${val:,.2f} | %{(val/total_val*100):.1f} | {'%'+str(TARGET_WEIGHTS.get(t)) if TARGET_WEIGHTS.get(t) else '—'} |\n"
     
-    md += f"\n> 💰 **Toplam:** ${total_val:,.2f} | 🛡️ **ATR Çarpanı:** {ATR_MULTIPLIER}x\n\n## 📈 Teknik Analiz & Stop Loss\n| Hisse | Fiyat | Stop Loss | Trend | RSI | Aksiyon |\n| :--- | ---: | ---: | :--- | ---: | ---: |\n"
+    md += f"\n> 💰 **Toplam:** ${total_val:,.2f} | 🛡️ **ATR Çarpanı:** {ATR_MULTIPLIER}x\n\n## 📈 Teknik Analiz & Stop Loss\n| Hisse | Önceki Kapanış Fiyat | Son Fiyat | Fiyat Artış/Azalış% | Stop Loss | Trend | RSI | Aksiyon |\n| :--- | ---: | ---: | :---: | ---: | :--- | ---: | ---: |\n"
     for r in results:
         t = r.get("ticker", "?")
-        if "error" in r: md += f"| **{t}** | — | — | — | — | ⚠️ {r['error']} |\n"; continue
+        if "error" in r: md += f"| **{t}** | — | — | — | — | — | — | ⚠️ {r['error']} |\n"; continue
         stop_alert = "🚨" if r['last_price'] < (r['stop_loss'] * 1.03) else ""
-        md += f"| **{t}** | ${r['last_price']:.2f} | ${r['stop_loss']} {stop_alert} | {r.get('trend_state', 'N/A')} | {r.get('rsi', '—')} | **{compute_action(r)}** |\n"
+        md += f"| **{t}** | ${r['prev_close']:.2f} | ${r['last_price']:.2f} | {r['change_str']} | ${r['stop_loss']} {stop_alert} | {r.get('trend_state', 'N/A')} | {r.get('rsi', '—')} | **{compute_action(r)}** |\n"
     return md
 
 def main():
