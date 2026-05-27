@@ -1,20 +1,23 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v29.0 (Momentum & Trend Engine)
+# main.py — Apex Terminal v30.2 (Savaş Modu: ATR 2.5)
 import io, logging, os, requests, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ApexTerminal")
 
 # ── Ayarlar ───────────────────────────────────────────────────────────────────
-SHEET_URL = os.getenv("SHEET_URL") or "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
-PERIOD = "2y"
-# Yeni Strateji Ağırlıkları
-TARGET_WEIGHTS = {
+SHEET_URL         = os.getenv("SHEET_URL") or "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
+PERIOD            = "2y"
+ATR_WINDOW        = 14
+ATR_MULTIPLIER    = 2.5  # Savaş dönemi için optimize edilmiş stop çarpanı
+VOL_LOW_THRESHOLD = float(os.getenv("VOL_LOW_THRESHOLD") or "30.0")
+TARGET_WEIGHTS    = {
     "VOO": 15.0, "SCHD": 10.0, "QQQM": 5.0, "SPUS": 5.0, 
     "VXUS": 15.0, "O": 7.5, "WPC": 7.5, "SMH": 7.5, 
     "AIS": 7.5, "NASA": 7.5
 }
 
+# ── Portföy Yükleme ────────────────────────────────────────────────────────────
 def get_portfolio() -> dict:
     try:
         r = requests.get(SHEET_URL, timeout=15)
@@ -29,70 +32,73 @@ def get_portfolio() -> dict:
         log.error(f"Portföy yüklenemedi: {e}")
         return {}
 
+# ── Teknik Analiz ve Aksiyon Motoru ────────────────────────────────────────────
 def analyze_ticker(ticker: str, df: pd.DataFrame) -> dict:
-    close = df["Close"].dropna()
+    close, high, low = df["Close"].dropna(), df["High"].dropna(), df["Low"].dropna()
     n = len(close)
     if n < 200: return {"ticker": ticker, "error": "veri_yetersiz"}
     
-    # Teknik Göstergeler
     last_p = float(close.iloc[-1])
     ema50  = close.ewm(span=50, adjust=False).mean().iloc[-1]
     ema200 = close.ewm(span=200, adjust=False).mean().iloc[-1]
     
+    # ATR ve Stop Loss
+    tr = pd.concat([high-low, (high-close.shift(1)).abs(), (low-close.shift(1)).abs()], axis=1).max(axis=1)
+    atr = tr.ewm(alpha=1/ATR_WINDOW, adjust=False).mean().iloc[-1]
+    
+    # RSI
     delta = close.diff()
-    gain  = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
-    loss  = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
-    rsi   = round(float((100 - (100 / (1 + gain / loss.replace(0, np.nan)))).iloc[-1]), 2)
+    gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+    rsi = round(float((100 - (100 / (1 + gain / loss.replace(0, np.nan)))).iloc[-1]), 2)
     
     return {
         "ticker": ticker, "last_price": round(last_p, 2), "rsi": rsi,
         "ema50": round(ema50, 2), "ema200": round(ema200, 2),
+        "stop_loss": round(last_p - (ATR_MULTIPLIER * atr), 2),
         "trend_state": "BULL" if last_p > ema50 > ema200 else ("BEAR" if last_p < ema50 < ema200 else "NEUTRAL")
     }
 
 def compute_action(r: dict) -> str:
     p, e50, e200, rsi = r.get("last_price", 0), r.get("ema50", 0), r.get("ema200", 0), r.get("rsi", 0)
-    
     if p > (e50 * 1.15) and rsi > 75: return "🔴 KAR AL"
     if p > e50 > e200 and 40 < rsi < 60: return "🟢 AL"
     if p > e50 and 60 <= rsi <= 70: return "🟡 TUT"
     if p < e50 < e200 and 40 <= rsi <= 50: return "🔴 SAT"
     return "⚪ NÖTR"
 
+# ── Rapor Oluşturma ────────────────────────────────────────────────────────────
 def build_report(portfolio: dict, results: list) -> str:
     price_map = {r["ticker"]: r.get("last_price", 0.0) for r in results if "error" not in r}
     total_val = sum(lots * price_map.get(t, 0) for t, lots in portfolio.items()) or 1.0
     
-    md = "# 🚀 Apex Terminal Raporu\n\n## 💼 Portföy Dağılımı\n| Hisse | Değer ($) | Mevcut % | Hedef % |\n| :--- | ---: | ---: | ---: |\n"
+    md = "# 🚀 Apex Terminal Raporu (Savaş Modu v2.5)\n\n## 💼 Portföy Dağılımı\n| Hisse | Değer ($) | Mevcut % | Hedef % |\n| :--- | ---: | ---: | ---: |\n"
     for t, lots in portfolio.items():
         val = lots * price_map.get(t, 0)
-        tgt = TARGET_WEIGHTS.get(t)
-        md += f"| **{t}** | ${val:,.2f} | %{(val/total_val*100):.1f} | {'%'+str(tgt) if tgt else '—'} |\n"
+        md += f"| **{t}** | ${val:,.2f} | %{(val/total_val*100):.1f} | {'%'+str(TARGET_WEIGHTS.get(t)) if TARGET_WEIGHTS.get(t) else '—'} |\n"
     
-    md += "\n## 📈 Teknik Analiz\n| Hisse | Fiyat | EMA-50 | Trend | RSI | Aksiyon |\n| :--- | ---: | ---: | :--- | ---: | ---: |\n"
+    md += f"\n> 💰 **Toplam:** ${total_val:,.2f} | 🛡️ **ATR Çarpanı:** {ATR_MULTIPLIER}x\n\n## 📈 Teknik Analiz & Stop Loss\n| Hisse | Fiyat | Stop Loss | Trend | RSI | Aksiyon |\n| :--- | ---: | ---: | :--- | ---: | ---: |\n"
     for r in results:
         t = r.get("ticker", "?")
         if "error" in r: md += f"| **{t}** | — | — | — | — | ⚠️ {r['error']} |\n"; continue
-        md += f"| **{t}** | ${r['last_price']:.2f} | {r['ema50']} | {r['trend_state']} | {r['rsi']} | **{compute_action(r)}** |\n"
+        stop_alert = "🚨" if r['last_price'] < (r['stop_loss'] * 1.03) else ""
+        md += f"| **{t}** | ${r['last_price']:.2f} | ${r['stop_loss']} {stop_alert} | {r['trend_state']} | {r['rsi']} | **{compute_action(r)}** |\n"
     return md
 
+# ── Ana Akış ───────────────────────────────────────────────────────────────────
 def main():
     portfolio = get_portfolio()
     if not portfolio: return
-    
     tickers = list(portfolio.keys())
     raw = yf.download(tickers, period=PERIOD, auto_adjust=True, progress=False)
     
-    level = 1 if isinstance(raw.columns, pd.MultiIndex) and tickers[0] in raw.columns.get_level_values(1) else (0 if isinstance(raw.columns, pd.MultiIndex) else -1)
-    results = []
+    # MultiIndex Guard
+    if len(tickers) == 1 and not isinstance(raw.columns, pd.MultiIndex):
+        raw = pd.concat({tickers[0]: raw}, axis=1).swaplevel(axis=1)
     
-    for t in tickers:
-        try:
-            df = raw.xs(t, axis=1, level=level) if level >= 0 else raw
-            results.append(analyze_ticker(t, df))
-        except Exception as e:
-            results.append({"ticker": t, "error": str(e)})
-            
+    level = 1 if isinstance(raw.columns, pd.MultiIndex) and tickers[0] in raw.columns.get_level_values(1) else (0 if isinstance(raw.columns, pd.MultiIndex) else -1)
+    results = [analyze_ticker(t, raw.xs(t, axis=1, level=level) if level >= 0 else raw) for t in tickers]
+    
     md = build_report(portfolio, results)
     if os.getenv("GITHUB_STEP_SUMMARY"):
         with open(os.getenv("GITHUB_STEP_SUMMARY"), "w", encoding="utf-8") as f: f.write(md)
