@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v31.0 (Final Production Ready)
+# main.py — Apex Terminal v31.2 (Final - Full Revision)
 import io, logging, os, requests, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -29,11 +29,8 @@ def get_portfolio() -> dict:
         return {}
 
 def analyze_ticker(ticker: str, df: pd.DataFrame) -> dict:
-    close = df["Close"].dropna()
-    high, low = df["High"].dropna(), df["Low"].dropna()
+    close, high, low = df["Close"].dropna(), df["High"].dropna(), df["Low"].dropna()
     n = len(close)
-    
-    # NASA gibi yeni varlıklar için hata korumalı eşik (EMA200 yoksa en az 30 gün veri şart)
     if n < 30: return {"ticker": ticker, "error": "veri_yetersiz"}
     
     last_p = float(close.iloc[-1])
@@ -44,9 +41,9 @@ def analyze_ticker(ticker: str, df: pd.DataFrame) -> dict:
     atr = tr.ewm(alpha=1/ATR_WINDOW, adjust=False).mean().iloc[-1]
     
     delta = close.diff()
-    gain  = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
-    loss  = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
-    rsi   = round(float((100 - (100 / (1 + gain / loss.replace(0, np.nan)))).iloc[-1]), 2)
+    gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+    rsi = round(float((100 - (100 / (1 + gain / loss.replace(0, np.nan)))).iloc[-1]), 2)
     
     return {
         "ticker": ticker, "last_price": round(last_p, 2), "rsi": rsi,
@@ -67,10 +64,10 @@ def build_report(portfolio: dict, results: list) -> str:
     price_map = {r["ticker"]: r.get("last_price", 0.0) for r in results if "error" not in r}
     total_val = sum(lots * price_map.get(t, 0) for t, lots in portfolio.items()) or 1.0
     
-    md = "# 🚀 Apex Terminal Raporu (Savaş Modu v2.5)\n\n## 💼 Portföy Dağılımı\n| Hisse | Değer ($) | Mevcut % | Hedef % |\n| :--- | ---: | ---: | ---: |\n"
+    md = "# 🚀 Apex Terminal Raporu (Savaş Modu v2.5)\n\n## 💼 Portföy Dağılımı\n| Hisse | Lot | Değer ($) | Mevcut % | Hedef % |\n| :--- | ---: | ---: | ---: | ---: |\n"
     for t, lots in portfolio.items():
         val = lots * price_map.get(t, 0)
-        md += f"| **{t}** | ${val:,.2f} | %{(val/total_val*100):.1f} | {'%'+str(TARGET_WEIGHTS.get(t)) if TARGET_WEIGHTS.get(t) else '—'} |\n"
+        md += f"| **{t}** | {lots} | ${val:,.2f} | %{(val/total_val*100):.1f} | {'%'+str(TARGET_WEIGHTS.get(t)) if TARGET_WEIGHTS.get(t) else '—'} |\n"
     
     md += f"\n> 💰 **Toplam:** ${total_val:,.2f} | 🛡️ **ATR Çarpanı:** {ATR_MULTIPLIER}x\n\n## 📈 Teknik Analiz & Stop Loss\n| Hisse | Fiyat | Stop Loss | Trend | RSI | Aksiyon |\n| :--- | ---: | ---: | :--- | ---: | ---: |\n"
     for r in results:
