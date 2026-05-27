@@ -10,6 +10,9 @@ permissions:
   contents: read
   actions: write              # GITHUB_STEP_SUMMARY yazımı için zorunlu
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"  # 2 Haziran 2026 Node.js 20 kapanış koruması
+
 jobs:
   run-engine:
     runs-on: ubuntu-latest
