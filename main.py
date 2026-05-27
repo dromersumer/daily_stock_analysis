@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v33.0 (Seans Takip ve Gün İçi Performans Paneli)
-import io, logging, os, requests, numpy as np, pandas as pd, yfinance as yf
+# main.py — Apex Terminal v33.1 (Seans Takip Paneli & Auto-Exit Entegreli)
+import io, logging, os, requests, sys, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ApexTerminal")
@@ -95,7 +95,9 @@ def build_report(portfolio: dict, results: list) -> str:
 
 def main():
     portfolio = get_portfolio()
-    if not portfolio: return
+    if not portfolio: 
+        sys.exit(0)
+    
     tickers = list(portfolio.keys())
     raw = yf.download(tickers, period=PERIOD, auto_adjust=True, progress=False)
     
@@ -106,5 +108,9 @@ def main():
     if os.getenv("GITHUB_STEP_SUMMARY"):
         with open(os.getenv("GITHUB_STEP_SUMMARY"), "w", encoding="utf-8") as f: f.write(md)
     print(md)
+    
+    # Sürecin kendi kendine durmasını ve askıda kalmamasını garanti ediyoruz
+    sys.exit(0)
 
-if __name__ == "__main__": main()
+if __name__ == "__main__": 
+    main()
