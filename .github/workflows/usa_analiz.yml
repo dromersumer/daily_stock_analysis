@@ -3,7 +3,7 @@ name: USA Analysis Engine
 
 on:
   schedule:
-    - cron: '0 20 * * 1-5'   # Hafta içi TSİ 23:00 (NYSE kapanışı sonrası)
+    - cron: '46 13,20 * * 1-5'  # Hafta içi TSİ 16:46 ve 23:16 saatlerinde otomatik çalışır
   workflow_dispatch:
 
 permissions:
