@@ -3,11 +3,11 @@ name: USA Portfolio Watch & Strategy
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # Manuel çalıştırma için
+  workflow_dispatch:
 
 permissions:
   contents: read
-  actions: write      # GitHub Summary sayfasına yazma izni
+  actions: write
 
 jobs:
   run-apex-terminal:
@@ -26,11 +26,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install yfinance pandas requests numpy
 
-      - name: Run Apex Terminal Watcher
-        run: python portfolio_watch.py
-
-      - name: Run Strategy Engine
-        env:
-          # Opsiyonel: Eşiği özelleştirmek istersen buradan değiştir
-          VOL_LOW_THRESHOLD: "30.0"
-        run: python strategy_engine.py
+      - name: Run Apex Terminal (Watch & Strategy)
+        run: |
+          python portfolio_watch.py
+          python strategy_engine.py
