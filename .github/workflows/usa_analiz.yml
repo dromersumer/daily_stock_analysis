@@ -3,12 +3,13 @@ name: USA Analysis Engine
 
 on:
   schedule:
-    - cron: '46 13,20 * * 1-5'  # Hafta içi TSİ 16:46 ve 23:16 saatlerinde otomatik çalışır
+    - cron: '46 13 * * 1-5'  # Hafta içi her gün TSİ 16:46 (Açılıştan 16 dk sonra)
+    - cron: '1 20 * * 1-5'   # Hafta içi her gün TSİ 23:01 (Kapanıştan 1 dk sonra)
   workflow_dispatch:
 
 permissions:
   contents: read
-  actions: write              # GITHUB_STEP_SUMMARY yazımı için zorunlu
+  actions: write              # GITHUB_STEP_SUMMARY rapor yazımı için zorunlu
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"  # 2 Haziran 2026 Node.js 20 kapanış koruması
