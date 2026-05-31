@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v36.2 (Kalıcı Link & En Kararlı Sürüm)
+# main.py — Apex Terminal v36.3 (Yeni Güncel Kalıcı Linkler Entegre Edildi)
 import io, logging, os, sys, requests, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ApexTerminal")
 
 # ── Ayarlar & Sabitler ────────────────────────────────────────────────────────
-# Gemini üzerine yazma (sürüm) modunda yükleme yaptığında bu linkler her zaman en güncel veriyi çeker.
-SHEET_URL_OMER  = "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
-SHEET_URL_OZLEM = "https://docs.google.com/spreadsheets/d/1GGC4p2q9DTDfkF6HQlEINE0Nqk7JVoqpoui2z_L98b8/export?format=csv"
+# Yeni güncel kalıcı Google Sheets export linkleriniz:
+SHEET_URL_OMER  = "https://docs.google.com/spreadsheets/d/1fwHGwQtJ3U8BpeCu6hXQqF-rse5oN_Pnf9TQ1qzGbdw/export?format=csv"
+SHEET_URL_OZLEM = "https://docs.google.com/spreadsheets/d/1XqQiFd3E-zvEJGN5jMTTPi4ZlrHEBZ9kLHgeNoYrkLw/export?format=csv"
 
 PERIOD, ATR_WINDOW, ATR_MULTIPLIER = "2y", 14, 3.0  # Volatilite koruması aktif
 TARGET_WEIGHTS = {
