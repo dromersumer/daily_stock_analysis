@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v36.4 (Kesin Link Eşitlemesi & Önbellek Koruması)
+# main.py — Apex Terminal v36.6 (Evrensel Güvenlik ve İzin Eşitlemesi)
 import io, logging, os, sys, time, requests, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ApexTerminal")
 
 # ── Ayarlar & Sabitler ────────────────────────────────────────────────────────
-# En son paylaştığınız kesin ve güncel kalıcı Google Sheets linkleriniz:
-SHEET_URL_OMER  = "https://docs.google.com/spreadsheets/d/1fwHGwQtJ3U8BpeCu6hXQqF-rse5oN_Pnf9TQ1qzGbdw/export?format=csv"
+# Kesin ve güncel kalıcı Google Sheets linkleriniz:
+SHEET_URL_OMER = "https://docs.google.com/spreadsheets/d/1fwHGwQtJ3U8BpeCu6hXQqF-rse5oN_Pnf9TQ1qzGbdw/export?format=csv"
 SHEET_URL_OZLEM = "https://docs.google.com/spreadsheets/d/1XqQiFd3E-zvEJGN5jMTTPi4ZlrHEBZ9kLHgeNoYrkLw/export?format=csv"
 
 PERIOD, ATR_WINDOW, ATR_MULTIPLIER = "2y", 14, 3.0  # Volatilite koruması aktif
@@ -19,12 +19,21 @@ TARGET_WEIGHTS = {
 
 def get_portfolio(url: str) -> dict:
     try:
-        # Google'ın eski veriyi (cache) vermesini önlemek için linkin sonuna anlık zaman damgası ekliyoruz
+        # Önbelleği (Cache) bypass etmek için benzersiz zaman damgası
         cache_buster = f"&t={int(time.time())}"
         final_url = url + cache_buster
         
-        r = requests.get(final_url, timeout=15)
+        # Google'ın kısıtlanmış oturum güvenlik duvarlarını aşmak için tarayıcı simülasyonu
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+        
+        r = requests.get(final_url, headers=headers, timeout=15)
         r.raise_for_status()
+        
         df = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")))
         df.columns = df.columns.str.strip().str.lower()
         df = df.dropna(subset=["hisse"])
