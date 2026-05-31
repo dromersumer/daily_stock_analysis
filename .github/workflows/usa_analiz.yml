@@ -30,6 +30,5 @@ jobs:
 
       - name: Run Apex Terminal
         env:
-          GDRIVE_SERVICE_ACCOUNT_KEY: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_KEY }}
           VOL_LOW_THRESHOLD: "30.0"
         run: python main.py
