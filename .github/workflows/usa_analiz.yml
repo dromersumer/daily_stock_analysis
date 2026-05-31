@@ -26,11 +26,10 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install yfinance pandas requests numpy
+        run: pip install -r requirements.txt
 
       - name: Run Apex Terminal
         env:
-          SHEET_URL: ${{ secrets.SHEET_URL }}
-          SHEET_URL_OZLEM: ${{ secrets.SHEET_URL_OZLEM }}
+          GDRIVE_SERVICE_ACCOUNT_KEY: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_KEY }}
           VOL_LOW_THRESHOLD: "30.0"
         run: python main.py
