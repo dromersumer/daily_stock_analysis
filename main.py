@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v36.3 (Yeni Güncel Kalıcı Linkler Entegre Edildi)
-import io, logging, os, sys, requests, numpy as np, pandas as pd, yfinance as yf
+# main.py — Apex Terminal v36.4 (Kesin Link Eşitlemesi & Önbellek Koruması)
+import io, logging, os, sys, time, requests, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ApexTerminal")
 
 # ── Ayarlar & Sabitler ────────────────────────────────────────────────────────
-# Yeni güncel kalıcı Google Sheets export linkleriniz:
+# En son paylaştığınız kesin ve güncel kalıcı Google Sheets linkleriniz:
 SHEET_URL_OMER  = "https://docs.google.com/spreadsheets/d/1fwHGwQtJ3U8BpeCu6hXQqF-rse5oN_Pnf9TQ1qzGbdw/export?format=csv"
 SHEET_URL_OZLEM = "https://docs.google.com/spreadsheets/d/1XqQiFd3E-zvEJGN5jMTTPi4ZlrHEBZ9kLHgeNoYrkLw/export?format=csv"
 
@@ -19,7 +19,11 @@ TARGET_WEIGHTS = {
 
 def get_portfolio(url: str) -> dict:
     try:
-        r = requests.get(url, timeout=15)
+        # Google'ın eski veriyi (cache) vermesini önlemek için linkin sonuna anlık zaman damgası ekliyoruz
+        cache_buster = f"&t={int(time.time())}"
+        final_url = url + cache_buster
+        
+        r = requests.get(final_url, timeout=15)
         r.raise_for_status()
         df = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")))
         df.columns = df.columns.str.strip().str.lower()
