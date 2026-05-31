@@ -1,33 +1,67 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v34.0 (Ömer & Özlem Çift Portföy Optimizasyonu)
-import io, logging, os, requests, sys, numpy as np, pandas as pd, yfinance as yf
+# main.py — Apex Terminal v35.0 (Dinamik Google Drive API Destekli)
+import io, json, logging, os, sys, numpy as np, pandas as pd, yfinance as yf
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ApexTerminal")
 
-# ── Ayarlar ───────────────────────────────────────────────────────────────────
-SHEET_URL_OMER  = os.getenv("SHEET_URL") or "https://docs.google.com/spreadsheets/d/1_bi1N5770a3BsPXreq_wHlU4reBQxVvUqd_tcdEaZPk/export?format=csv"
-SHEET_URL_OZLEM = os.getenv("SHEET_URL_OZLEM") or "https://docs.google.com/spreadsheets/d/1GGC4p2q9DTDfkF6HQlEINE0Nqk7JVoqpoui2z_L98b8/export?format=csv"
+# ── Ayarlar & Sabitler ────────────────────────────────────────────────────────
+FOLDER_ID = "13GFB_k1Y5toNGKCmj3EUKLO5Gdp7T9Zp"
+FILE_NAME_OMER = "ABDPortfoy.csv"
+FILE_NAME_OZLEM = "ABDPortfoy_Ozlem.csv"
 
-PERIOD, ATR_WINDOW, ATR_MULTIPLIER = "2y", 14, 3.0  # Halka arz volatilitesi için 3.0 koruması aktif
+PERIOD, ATR_WINDOW, ATR_MULTIPLIER = "2y", 14, 3.0  # Volatilite koruması aktif
 TARGET_WEIGHTS = {
     "VOO": 15.0, "SCHD": 10.0, "QQQM": 5.0, "SPUS": 5.0, 
     "VXUS": 15.0, "O": 7.5, "WPC": 7.5, "SMH": 7.5, 
     "AIS": 7.5, "NASA": 7.5
 }
 
-def get_portfolio(url: str) -> dict:
+def get_gdrive_service():
     try:
-        r = requests.get(url, timeout=15)
-        r.raise_for_status()
-        df = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")))
+        key_json = os.getenv("GDRIVE_SERVICE_ACCOUNT_KEY")
+        if not key_json:
+            log.error("HATA: GDRIVE_SERVICE_ACCOUNT_KEY bulunamadı!")
+            return None
+        info = json.loads(key_json)
+        creds = service_account.Credentials.from_service_account_info(
+            info, scopes=["https://www.googleapis.com/auth/drive.readonly"]
+        )
+        return build("drive", "v3", credentials=creds)
+    except Exception as e:
+        log.error(f"Google Drive API servisi başlatılamadı: {e}")
+        return None
+
+def download_csv_from_gdrive(service, folder_id: str, filename: str) -> dict:
+    try:
+        query = f"'{folder_id}' in parents and name = '{filename}' and trashed = false"
+        results = service.files().list(q=query, fields="files(id, name)").execute()
+        items = results.get("files", [])
+        
+        if not items:
+            log.warning(f"Klasörde '{filename}' isimli dosya bulunamadı.")
+            return {}
+            
+        file_id = items[0]["id"]
+        request = service.files().get_media(fileId=file_id)
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while done is False:
+            _, done = downloader.next_chunk()
+            
+        fh.seek(0)
+        df = pd.read_csv(io.StringIO(fh.read().decode("utf-8-sig")))
         df.columns = df.columns.str.strip().str.lower()
         df = df.dropna(subset=["hisse"])
         df["hisse"] = df["hisse"].astype(str).str.strip().str.upper().str.split(":").str[-1]
         df["lot"]   = df["lot"].astype(str).str.replace(",", ".", regex=False).pipe(pd.to_numeric, errors="coerce").fillna(0)
         return dict(zip(df["hisse"], df[df["lot"] > 0]["lot"]))
     except Exception as e:
-        log.error(f"Portföy yüklenemedi ({url}): {e}")
+        log.error(f"Google Drive'dan dosya indirilirken hata oluştu ({filename}): {e}")
         return {}
 
 def analyze_ticker(ticker: str, df: pd.DataFrame) -> dict:
@@ -100,22 +134,23 @@ def build_user_report(user_name: str, portfolio: dict, global_results: dict) -> 
     return md
 
 def main():
-    # 1. Portföyleri yükle
-    p_omer = get_portfolio(SHEET_URL_OMER)
-    p_ozlem = get_portfolio(SHEET_URL_OZLEM)
+    service = get_gdrive_service()
+    if not service:
+        sys.exit(1)
+        
+    # Dosyaları link bağımsız, sadece isimleriyle klasörden çekiyoruz
+    p_omer = download_csv_from_gdrive(service, FOLDER_ID, FILE_NAME_OMER)
+    p_ozlem = download_csv_from_gdrive(service, FOLDER_ID, FILE_NAME_OZLEM)
     
     if not p_omer and not p_ozlem:
-        log.error("Her iki portföy de boş veya yüklenemedi.")
+        log.error("Her iki portföy de boş veya Drive'dan yüklenemedi.")
         sys.exit(0)
         
-    # 2. Benzersiz hisseleri birleştir (MÜKERRER SORGULAMAYI ENGELLER)
     all_tickers = list(set(list(p_omer.keys()) + list(p_ozlem.keys())))
     
-    # 3. Yahoo Finance üzerinden TEK SEFERDE toplu veri çek
     raw = yf.download(all_tickers, period=PERIOD, auto_adjust=True, progress=False)
     level = 1 if isinstance(raw.columns, pd.MultiIndex) and all_tickers[0] in raw.columns.get_level_values(1) else (0 if isinstance(raw.columns, pd.MultiIndex) else -1)
     
-    # 4. Tüm hisseleri analiz edip ortak bir havuzda sakla
     global_results = {}
     for t in all_tickers:
         try:
@@ -124,7 +159,6 @@ def main():
         except Exception as e:
             global_results[t] = {"ticker": t, "error": str(e)}
             
-    # 5. Ayrı ayrı raporları oluştur ve birleştir
     final_md = "# 🚀 Apex Terminal Ortak Rapor Paneli\n"
     final_md += f"> 🛡️ **Sistem Parametresi (Mevcut Risk):** {ATR_MULTIPLIER}x ATR Stop\n\n---\n\n"
     
@@ -133,7 +167,6 @@ def main():
     if p_ozlem:
         final_md += build_user_report("Özlem", p_ozlem, global_results)
         
-    # 6. Çıktıyı bas ve kaydet
     if os.getenv("GITHUB_STEP_SUMMARY"):
         with open(os.getenv("GITHUB_STEP_SUMMARY"), "w", encoding="utf-8") as f: f.write(final_md)
     print(final_md)
