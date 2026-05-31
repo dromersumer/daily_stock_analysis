@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
-# main.py — Apex Terminal v35.0 (Dinamik Google Drive API Destekli)
-import io, json, logging, os, sys, numpy as np, pandas as pd, yfinance as yf
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+# main.py — Apex Terminal v36.0 (Şifresiz Web Tarayıcı Modu)
+import io, logging, os, re, sys, requests, numpy as np, pandas as pd, yfinance as yf
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger("ApexTerminal")
@@ -20,48 +17,41 @@ TARGET_WEIGHTS = {
     "AIS": 7.5, "NASA": 7.5
 }
 
-def get_gdrive_service():
+def download_csv_from_public_folder(folder_id: str, filename: str) -> dict:
     try:
-        key_json = os.getenv("GDRIVE_SERVICE_ACCOUNT_KEY")
-        if not key_json:
-            log.error("HATA: GDRIVE_SERVICE_ACCOUNT_KEY bulunamadı!")
-            return None
-        info = json.loads(key_json)
-        creds = service_account.Credentials.from_service_account_info(
-            info, scopes=["https://www.googleapis.com/auth/drive.readonly"]
-        )
-        return build("drive", "v3", credentials=creds)
-    except Exception as e:
-        log.error(f"Google Drive API servisi başlatılamadı: {e}")
-        return None
-
-def download_csv_from_gdrive(service, folder_id: str, filename: str) -> dict:
-    try:
-        query = f"'{folder_id}' in parents and name = '{filename}' and trashed = false"
-        results = service.files().list(q=query, fields="files(id, name)").execute()
-        items = results.get("files", [])
+        # Herkese açık klasörün web sayfasını sorgula
+        url = f"https://drive.google.com/embeddedfolderview?id={folder_id}"
+        r = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
         
-        if not items:
-            log.warning(f"Klasörde '{filename}' isimli dosya bulunamadı.")
+        # Sayfa içeriğinde dosya adını ve ona ait benzersiz ID'yi eşleştir
+        pattern = rf'"{re.escape(filename)}".*?"([^"]+)"'
+        match = re.search(pattern, r.text)
+        
+        if not match:
+            # Alternatif eşleşme algoritması
+            pattern_alt = rf'id":"([^"]+)".*?"name":"{re.escape(filename)}"'
+            match = re.search(pattern_alt, r.text)
+            
+        if not match:
+            log.warning(f"Klasör tarama: '{filename}' bulunamadı. Lütfen dosya ismini ve klasör izinlerini kontrol edin.")
             return {}
             
-        file_id = items[0]["id"]
-        request = service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while done is False:
-            _, done = downloader.next_chunk()
-            
-        fh.seek(0)
-        df = pd.read_csv(io.StringIO(fh.read().decode("utf-8-sig")))
+        file_id = match.group(1)
+        
+        # Doğrudan CSV indirme linkini inşa et ve indir
+        dl_url = f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv"
+        dl_r = requests.get(dl_url, timeout=15)
+        dl_r.raise_for_status()
+        
+        df = pd.read_csv(io.StringIO(dl_r.content.decode("utf-8-sig")))
         df.columns = df.columns.str.strip().str.lower()
         df = df.dropna(subset=["hisse"])
         df["hisse"] = df["hisse"].astype(str).str.strip().str.upper().str.split(":").str[-1]
         df["lot"]   = df["lot"].astype(str).str.replace(",", ".", regex=False).pipe(pd.to_numeric, errors="coerce").fillna(0)
         return dict(zip(df["hisse"], df[df["lot"] > 0]["lot"]))
     except Exception as e:
-        log.error(f"Google Drive'dan dosya indirilirken hata oluştu ({filename}): {e}")
+        log.error(f"Dosya web üzerinden indirilirken hata oluştu ({filename}): {e}")
         return {}
 
 def analyze_ticker(ticker: str, df: pd.DataFrame) -> dict:
@@ -134,16 +124,12 @@ def build_user_report(user_name: str, portfolio: dict, global_results: dict) -> 
     return md
 
 def main():
-    service = get_gdrive_service()
-    if not service:
-        sys.exit(1)
-        
-    # Dosyaları link bağımsız, sadece isimleriyle klasörden çekiyoruz
-    p_omer = download_csv_from_gdrive(service, FOLDER_ID, FILE_NAME_OMER)
-    p_ozlem = download_csv_from_gdrive(service, FOLDER_ID, FILE_NAME_OZLEM)
+    # Klasörden sadece isimleri belirterek şifresiz çekim yapıyoruz
+    p_omer = download_csv_from_public_folder(FOLDER_ID, FILE_NAME_OMER)
+    p_ozlem = download_csv_from_public_folder(FOLDER_ID, FILE_NAME_OZLEM)
     
     if not p_omer and not p_ozlem:
-        log.error("Her iki portföy de boş veya Drive'dan yüklenemedi.")
+        log.error("HATA: İki portföy dosyası da klasörde bulunamadı veya okunamadı.")
         sys.exit(0)
         
     all_tickers = list(set(list(p_omer.keys()) + list(p_ozlem.keys())))
